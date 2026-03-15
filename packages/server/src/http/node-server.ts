@@ -27,8 +27,16 @@ export interface ApiServer {
   url: string;
 }
 
+function getRequestOrigin(req: IncomingMessage): string {
+  const forwardedProto = req.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim();
+  const forwardedHost = req.headers["x-forwarded-host"]?.toString().split(",")[0]?.trim();
+  const host = forwardedHost || req.headers.host || "127.0.0.1";
+  const proto = forwardedProto || "http";
+  return `${proto}://${host}`;
+}
+
 async function toRequest(req: IncomingMessage): Promise<Request> {
-  const origin = `http://${req.headers.host ?? "127.0.0.1"}`;
+  const origin = getRequestOrigin(req);
   const url = new URL(req.url ?? "/", origin);
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : Readable.toWeb(req);
 
@@ -104,7 +112,7 @@ export async function startApiServer(options: {
   watcher.start();
   const server = createServer(async (req, res) => {
     try {
-      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
+      const url = new URL(req.url ?? "/", getRequestOrigin(req));
 
       // Try static file serving first (for non-API routes)
       if (req.method === "GET" && tryServeStatic(url.pathname, options.webRoot, res)) {
