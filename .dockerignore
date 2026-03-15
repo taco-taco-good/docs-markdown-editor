@@ -1,0 +1,14 @@
+node_modules
+packages/web/node_modules
+packages/web/dist
+.DS_Store
+.env
+.env.local
+deploy/.env
+deploy/.env.local
+env
+env.local
+server.log
+packages/web/web.log
+docs-data
+.claude

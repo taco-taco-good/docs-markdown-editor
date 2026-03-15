@@ -1,0 +1,13 @@
+{
+  "name": "docs-markdown-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bash ./deploy/scripts/dev.sh",
+    "dev:server": "bash ./deploy/scripts/dev-server.sh",
+    "dev:web": "bash ./deploy/scripts/dev-web.sh",
+    "serve": "bash ./deploy/scripts/serve.sh",
+    "user:create": "bash ./deploy/scripts/create-local-user.sh",
+    "test": "node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts"
+  }
+}

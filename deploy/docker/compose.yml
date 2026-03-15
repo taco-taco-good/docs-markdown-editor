@@ -1,0 +1,19 @@
+services:
+  docs-markdown-editor:
+    container_name: docs-markdown-editor
+    image: ${IMAGE_NAME:-docs-markdown-editor:local}
+    env_file:
+      - ../../.env
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    environment:
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-3001}
+      WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/data}
+      WEB_ROOT: /app/packages/web/dist
+    volumes:
+      - "${WORKSPACE_ROOT_HOST:-../../docs-data}:${WORKSPACE_ROOT:-/data}"
+    restart: unless-stopped
