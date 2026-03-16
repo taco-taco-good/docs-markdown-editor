@@ -1,11 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTreeStore } from "../../stores/tree.store";
 import { TreeNodeItem } from "./TreeNode";
-
-function buildRootTargetLabel(from: string): string {
-  const segments = from.split("/").filter(Boolean);
-  return segments[segments.length - 1] ?? from;
-}
 
 export function FileTree({
   onCreateDocument,
@@ -17,9 +12,7 @@ export function FileTree({
   const nodes = useTreeStore((s) => s.nodes);
   const loading = useTreeStore((s) => s.loading);
   const loadTree = useTreeStore((s) => s.loadTree);
-  const repositionNode = useTreeStore((s) => s.repositionNode);
   const selectPath = useTreeStore((s) => s.selectPath);
-  const [rootDropTarget, setRootDropTarget] = useState<string | null>(null);
 
   useEffect(() => {
     loadTree();
@@ -60,22 +53,6 @@ export function FileTree({
           selectPath("");
         }
       }}
-      onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes("application/docs-md-path")) return;
-        event.preventDefault();
-        const from = event.dataTransfer.getData("application/docs-md-path");
-        setRootDropTarget(from ? buildRootTargetLabel(from) : null);
-      }}
-      onDragLeave={() => {
-        setRootDropTarget(null);
-      }}
-      onDrop={(event) => {
-        const from = event.dataTransfer.getData("application/docs-md-path");
-        setRootDropTarget(null);
-        if (!from) return;
-        event.preventDefault();
-        void repositionNode(from, { placement: "root" });
-      }}
     >
       <div className="shrink-0">
         {nodes.map((node) => (
@@ -87,34 +64,6 @@ export function FileTree({
             onCreateFolder={onCreateFolder}
           />
         ))}
-      </div>
-      <div
-        className="flex-1 min-h-[6rem] mt-2 rounded-md"
-        onClick={() => selectPath("")}
-        onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes("application/docs-md-path")) return;
-          event.preventDefault();
-          const from = event.dataTransfer.getData("application/docs-md-path");
-          setRootDropTarget(from ? buildRootTargetLabel(from) : null);
-        }}
-        onDragLeave={() => setRootDropTarget(null)}
-        onDrop={(event) => {
-          const from = event.dataTransfer.getData("application/docs-md-path");
-          setRootDropTarget(null);
-          if (!from) return;
-          event.preventDefault();
-          void repositionNode(from, { placement: "root" });
-        }}
-        style={{
-          background: "transparent",
-          border: rootDropTarget ? "1px dashed color-mix(in srgb, var(--color-accent) 70%, transparent)" : "1px dashed transparent",
-        }}
-      >
-        {rootDropTarget ? (
-          <div className="tree-root-drop-indicator">
-            이동 위치: /{rootDropTarget}
-          </div>
-        ) : null}
       </div>
     </nav>
   );

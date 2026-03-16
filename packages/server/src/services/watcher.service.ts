@@ -99,6 +99,8 @@ export class WatcherService {
             type: "doc:content",
             path: event.path,
             content: document.content,
+            frontmatter: document.frontmatter,
+            originClientId: null,
           });
         } catch {
           // Ignore files that disappear mid-refresh.

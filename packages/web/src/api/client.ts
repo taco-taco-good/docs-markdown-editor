@@ -1,5 +1,7 @@
 /** REST API client for docs-markdown-editor server */
 
+import { getEditorClientId } from "../lib/editor-client.js";
+
 export interface Frontmatter {
   title?: string;
   tags?: string[];
@@ -14,6 +16,7 @@ export interface DocumentMeta {
   size: number;
   createdAt: string;
   modifiedAt: string;
+  revision?: string;
 }
 
 export interface Document {
@@ -106,6 +109,20 @@ interface ApiError {
   error: { code: string; message: string; details?: unknown };
 }
 
+export class ApiRequestError extends Error {
+  code: string;
+  status: number;
+  details?: unknown;
+
+  constructor(options: { code: string; message: string; status: number; details?: unknown }) {
+    super(options.message);
+    this.name = "ApiRequestError";
+    this.code = options.code;
+    this.status = options.status;
+    this.details = options.details;
+  }
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -129,7 +146,12 @@ class ApiClient {
       const err: ApiError = await res.json().catch(() => ({
         error: { code: "UNKNOWN", message: res.statusText },
       }));
-      throw new Error(err.error.message);
+      throw new ApiRequestError({
+        code: err.error.code,
+        message: err.error.message,
+        status: res.status,
+        details: err.error.details,
+      });
     }
 
     if (res.status === 204) return undefined as T;
@@ -147,9 +169,14 @@ class ApiClient {
     docPath: string,
     content: string,
     frontmatter?: Partial<Frontmatter>,
+    baseRevision?: string,
   ): Promise<Document> {
     return this.request<Document>(`/api/docs/${encodeURIComponent(docPath)}`, {
       method: "PATCH",
+      headers: {
+        "X-Client-Id": getEditorClientId(),
+        ...(baseRevision ? { "X-Base-Revision": baseRevision } : {}),
+      },
       body: JSON.stringify({ content, frontmatter }),
     });
   }

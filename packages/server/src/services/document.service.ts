@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
@@ -19,6 +20,7 @@ export interface ReadDocumentResult {
   raw: string;
   content: string;
   frontmatter: Record<string, FrontmatterValue>;
+  revision: string;
   changed: boolean;
   supportedInWysiwyg: boolean;
 }
@@ -64,6 +66,7 @@ export class DocumentService {
       raw,
       content: document.body,
       frontmatter: document.frontmatter,
+      revision: createHash("sha1").update(raw).digest("hex"),
       changed: false,
       supportedInWysiwyg: support.supportedInWysiwyg,
     };

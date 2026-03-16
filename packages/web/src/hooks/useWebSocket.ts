@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import type { Frontmatter } from "../api/client";
 import { useTreeStore } from "../stores/tree.store";
 import { useDocumentStore } from "../stores/document.store";
 
@@ -11,7 +12,13 @@ type WSEvent =
   | { type: "dir:moved"; from: string; to: string }
   | { type: "dir:created"; path: string }
   | { type: "dir:deleted"; path: string }
-  | { type: "doc:content"; path: string; content: string }
+  | {
+      type: "doc:content";
+      path: string;
+      content: string;
+      frontmatter: Frontmatter;
+      originClientId: string | null;
+    }
   | { type: "error"; message: string };
 
 export function useWebSocket() {
@@ -32,7 +39,7 @@ export function useWebSocket() {
         handleWSEvent(event);
 
         if (event.type === "doc:content" && event.path === currentPathRef.current) {
-          handleExternalUpdate(event.content);
+          handleExternalUpdate(event.content, event.originClientId, event.frontmatter);
         }
         if (event.type === "file:moved" || event.type === "dir:moved") {
           handleExternalMove(event.from, event.to);

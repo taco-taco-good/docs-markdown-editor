@@ -8,6 +8,6 @@
     "dev:web": "bash ./deploy/scripts/dev-web.sh",
     "serve": "bash ./deploy/scripts/serve.sh",
     "user:create": "bash ./deploy/scripts/create-local-user.sh",
-    "test": "node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts"
+    "test": "node --experimental-specifier-resolution=node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
   }
 }

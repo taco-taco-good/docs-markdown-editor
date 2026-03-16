@@ -20,6 +20,7 @@ export function Header() {
   const openSettings = useUIStore((s) => s.openSettings);
   const currentPath = useDocumentStore((s) => s.currentPath);
   const saveStatus = useDocumentStore((s) => s.saveStatus);
+  const hasPendingRemoteUpdate = useDocumentStore((s) => s.hasPendingRemoteUpdate);
   const username = useAuthStore((s) => s.username);
   const logout = useAuthStore((s) => s.logout);
   const [workspaceName, setWorkspaceName] = useState("");
@@ -136,13 +137,19 @@ export function Header() {
               <span>저장 중…</span>
             </>
           )}
+          {saveStatus !== "saving" && hasPendingRemoteUpdate && (
+            <>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--color-warning)" }} />
+              <span>실시간 동기화 중…</span>
+            </>
+          )}
           {saveStatus === "saved" && (
             <>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--color-success)" }} />
               <span>저장됨</span>
             </>
           )}
-          {saveStatus === "conflict" && (
+          {saveStatus === "conflict" && !hasPendingRemoteUpdate && (
             <>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--color-danger)" }} />
               <span>충돌</span>

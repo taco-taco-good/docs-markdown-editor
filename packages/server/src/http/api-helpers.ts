@@ -24,6 +24,7 @@ export interface ApiDocument {
     frontmatter: Record<string, FrontmatterValue>;
     size: number;
     modifiedAt: string;
+    revision: string;
   };
   content: string;
   raw: string;
@@ -99,6 +100,11 @@ export function getClientKey(request: Request): string {
   return forwardedFor || realIp || "unknown";
 }
 
+export function getEditorClientIdFromRequest(request: Request): string | null {
+  const clientId = request.headers.get("x-client-id")?.trim();
+  return clientId ? clientId : null;
+}
+
 export function requestIsSecure(request: Request): boolean {
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
   if (forwardedProto === "https") return true;
@@ -139,6 +145,7 @@ export function toApiDocument(document: ReadDocumentResult, documentService: Doc
       frontmatter: document.frontmatter,
       size: stats.size,
       modifiedAt: stats.modifiedAt,
+      revision: document.revision,
     },
     content: document.content,
     raw: document.raw,
@@ -241,8 +248,19 @@ export function mapError(error: unknown): Response {
 
 // ── Publish helper ──
 
-export function publishDocumentSnapshot(ctx: ApiContext, path: string, eventType: "file:created" | "file:updated"): void {
+export function publishDocumentSnapshot(
+  ctx: ApiContext,
+  path: string,
+  eventType: "file:created" | "file:updated",
+  originClientId: string | null = null,
+): void {
   const document = ctx.documentService.read(path);
   ctx.realtimeService.publish({ type: eventType, path });
-  ctx.realtimeService.publish({ type: "doc:content", path, content: document.content });
+  ctx.realtimeService.publish({
+    type: "doc:content",
+    path,
+    content: document.content,
+    frontmatter: document.frontmatter,
+    originClientId,
+  });
 }
