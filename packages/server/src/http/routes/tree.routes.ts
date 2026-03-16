@@ -44,6 +44,8 @@ export async function handleTreeRoutes(
         type: "doc:content",
         path: moved.to,
         content: movedDocument.content,
+        frontmatter: movedDocument.frontmatter,
+        originClientId: null,
       });
     }
     if (moved.type === "directory") {

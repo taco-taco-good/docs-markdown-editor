@@ -7,6 +7,8 @@ export function RawEditor() {
   const currentDoc = useDocumentStore((s) => s.currentDoc);
   const currentPath = useDocumentStore((s) => s.currentPath);
   const updateContent = useDocumentStore((s) => s.updateContent);
+  const beginComposition = useDocumentStore((s) => s.beginComposition);
+  const endComposition = useDocumentStore((s) => s.endComposition);
   const showToast = useUIStore((s) => s.showToast);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -65,6 +67,8 @@ export function RawEditor() {
         onChange={handleChange}
         onDrop={handleDrop}
         onKeyDown={handleKeyDown}
+        onCompositionStart={beginComposition}
+        onCompositionEnd={endComposition}
         spellCheck={false}
         autoComplete="off"
         autoCapitalize="off"

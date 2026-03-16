@@ -3,6 +3,16 @@ import { useTreeStore } from "../../stores/tree.store";
 import { useDocumentStore } from "../../stores/document.store";
 import { useUIStore } from "../../stores/ui.store";
 import type { TreeNode } from "../../api/client";
+import { clearDragSource, CUSTOM_MIME_TYPE, getDragSource, setDragSource } from "./drag-source";
+import { resolveDropIntentFromRatio, type TreeDropMode } from "../../lib/tree-dnd";
+
+const dropHighlightListeners = new Set<(path: string | null) => void>();
+
+function announceActiveDropTarget(path: string | null): void {
+  for (const listener of dropHighlightListeners) {
+    listener(path);
+  }
+}
 
 interface TreeNodeProps {
   node: TreeNode;
@@ -11,42 +21,15 @@ interface TreeNodeProps {
   onCreateFolder: (parentPath: string) => void;
 }
 
-function parentDirectoryFromPath(path: string): string {
-  const segments = path.split("/");
-  segments.pop();
-  return segments.join("/");
-}
-
-type DropMode = "inside" | "before" | "after";
-
 function resolveDropIntent(
   sourcePath: string,
   target: TreeNode,
   event: DragEvent<HTMLDivElement>,
-): { targetPath?: string; mode: DropMode } | null {
-  if (!sourcePath || sourcePath === target.path) return null;
-
+): { targetPath: string; mode: TreeDropMode } | null {
   const rect = event.currentTarget.getBoundingClientRect();
   const offsetY = event.clientY - rect.top;
   const ratio = rect.height > 0 ? offsetY / rect.height : 0.5;
-  const targetParent = parentDirectoryFromPath(target.path);
-
-  if (target.type === "directory" && ratio >= 0.25 && ratio <= 0.75) {
-    if (sourcePath.startsWith(`${target.path}/`)) {
-      return null;
-    }
-    return { targetPath: target.path, mode: "inside" };
-  }
-
-  if (ratio < 0.5) {
-    return { targetPath: target.path, mode: "before" };
-  }
-
-  if (sourcePath === target.path || parentDirectoryFromPath(sourcePath) === targetParent && sourcePath === target.path) {
-    return null;
-  }
-
-  return { targetPath: target.path, mode: "after" };
+  return resolveDropIntentFromRatio(sourcePath, target, ratio);
 }
 
 export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: TreeNodeProps) {
@@ -60,11 +43,12 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
   const openDocument = useDocumentStore((s) => s.openDocument);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const showToast = useUIStore((s) => s.showToast);
-  const [dropTarget, setDropTarget] = useState<{ path: string; mode: DropMode } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ path: string; mode: TreeDropMode } | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(node.name);
+  const [isDragging, setIsDragging] = useState(false);
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragDepthRef = useRef(0);
+  const clearDropTargetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isExpanded = expandedPaths.has(node.path);
   const isSelected = selectedPath === node.path;
@@ -83,6 +67,51 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
     if (expandTimerRef.current) {
       clearTimeout(expandTimerRef.current);
     }
+    if (clearDropTargetTimerRef.current) {
+      clearTimeout(clearDropTargetTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleActiveDropTargetChange = (activePath: string | null) => {
+      if (activePath === node.path) return;
+      if (clearDropTargetTimerRef.current) {
+        clearTimeout(clearDropTargetTimerRef.current);
+        clearDropTargetTimerRef.current = null;
+      }
+      if (expandTimerRef.current) {
+        clearTimeout(expandTimerRef.current);
+        expandTimerRef.current = null;
+      }
+      setDropTarget(null);
+    };
+
+    dropHighlightListeners.add(handleActiveDropTargetChange);
+    return () => {
+      dropHighlightListeners.delete(handleActiveDropTargetChange);
+    };
+  }, [node.path]);
+
+  useEffect(() => {
+    const clearDropState = () => {
+      if (clearDropTargetTimerRef.current) {
+        clearTimeout(clearDropTargetTimerRef.current);
+        clearDropTargetTimerRef.current = null;
+      }
+      if (expandTimerRef.current) {
+        clearTimeout(expandTimerRef.current);
+        expandTimerRef.current = null;
+      }
+      setDropTarget(null);
+      announceActiveDropTarget(null);
+    };
+
+    window.addEventListener("dragend", clearDropState);
+    window.addEventListener("drop", clearDropState);
+    return () => {
+      window.removeEventListener("dragend", clearDropState);
+      window.removeEventListener("drop", clearDropState);
+    };
   }, []);
 
   const commitRename = async () => {
@@ -132,26 +161,29 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
         className="relative w-full flex items-center gap-1 min-h-7 rounded-md px-2 py-1 text-left text-[13px] transition-colors group"
         style={{
           paddingLeft: `${depth * 14 + 8}px`,
-          paddingBottom: isDropActive ? "2rem" : undefined,
-          background: isDropActive
+          background: dropMode === "inside"
             ? "color-mix(in srgb, var(--color-accent) 20%, var(--color-surface-2))"
             : isSelected
               ? "var(--color-surface-3)"
               : "transparent",
           color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-          boxShadow: isDropActive
+          opacity: isDragging ? 0.4 : 1,
+          boxShadow: dropMode === "inside"
             ? "inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 85%, transparent)"
             : "none",
         }}
         draggable={!editingName}
         data-drop-mode={dropMode ?? undefined}
         onDragStart={(event) => {
-          dragDepthRef.current = 0;
+          setIsDragging(true);
+          setDragSource(node.path);
           event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("application/docs-md-path", node.path);
+          event.dataTransfer.setData(CUSTOM_MIME_TYPE, node.path);
           event.dataTransfer.setData("text/plain", node.path);
         }}
         onDragEnd={() => {
+          setIsDragging(false);
+          clearDragSource();
           if (expandTimerRef.current) {
             clearTimeout(expandTimerRef.current);
             expandTimerRef.current = null;
@@ -159,20 +191,29 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
           setDropTarget(null);
         }}
         onDragEnter={(event) => {
-          const sourcePath = event.dataTransfer.getData("application/docs-md-path");
+          const sourcePath = getDragSource(event.dataTransfer);
           const intent = resolveDropIntent(sourcePath, node, event);
           if (!intent) return;
-          dragDepthRef.current += 1;
-          setDropTarget({ path: intent.targetPath ?? "", mode: intent.mode });
+          if (clearDropTargetTimerRef.current) {
+            clearTimeout(clearDropTargetTimerRef.current);
+            clearDropTargetTimerRef.current = null;
+          }
+          announceActiveDropTarget(node.path);
+          setDropTarget({ path: intent.targetPath, mode: intent.mode });
         }}
         onDragOver={(event) => {
-          const sourcePath = event.dataTransfer.getData("application/docs-md-path");
+          const sourcePath = getDragSource(event.dataTransfer);
           const intent = resolveDropIntent(sourcePath, node, event);
           if (!intent) return;
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
-          setDropTarget({ path: intent.targetPath ?? "", mode: intent.mode });
+          if (clearDropTargetTimerRef.current) {
+            clearTimeout(clearDropTargetTimerRef.current);
+            clearDropTargetTimerRef.current = null;
+          }
+          announceActiveDropTarget(node.path);
+          setDropTarget({ path: intent.targetPath, mode: intent.mode });
           if (intent.mode === "inside" && isDirectory && !isExpanded && !expandTimerRef.current) {
             expandTimerRef.current = setTimeout(() => {
               toggleExpand(node.path);
@@ -182,22 +223,32 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
         }}
         onDragLeave={(event) => {
           event.stopPropagation();
-          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-          if (dragDepthRef.current > 0) return;
-          if (expandTimerRef.current) {
-            clearTimeout(expandTimerRef.current);
-            expandTimerRef.current = null;
+          if (clearDropTargetTimerRef.current) {
+            clearTimeout(clearDropTargetTimerRef.current);
           }
-          setDropTarget(null);
+          clearDropTargetTimerRef.current = setTimeout(() => {
+            if (expandTimerRef.current) {
+              clearTimeout(expandTimerRef.current);
+              expandTimerRef.current = null;
+            }
+            setDropTarget(null);
+            announceActiveDropTarget(null);
+            clearDropTargetTimerRef.current = null;
+          }, 40);
         }}
         onDrop={(event) => {
-          const sourcePath = event.dataTransfer.getData("application/docs-md-path");
+          const sourcePath = getDragSource(event.dataTransfer);
           const intent = resolveDropIntent(sourcePath, node, event);
+          if (clearDropTargetTimerRef.current) {
+            clearTimeout(clearDropTargetTimerRef.current);
+            clearDropTargetTimerRef.current = null;
+          }
           if (expandTimerRef.current) {
             clearTimeout(expandTimerRef.current);
             expandTimerRef.current = null;
           }
           setDropTarget(null);
+          announceActiveDropTarget(null);
           if (!sourcePath || !intent) return;
           event.preventDefault();
           event.stopPropagation();
@@ -332,26 +383,8 @@ export function TreeNodeItem({ node, depth, onCreateDocument, onCreateFolder }: 
             <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
           </svg>
         </button>
-        {dropTargetPath ? (
-          <>
-            {dropMode === "inside" ? (
-              <>
-                <span className="tree-drop-callout" data-drop-mode={dropMode ?? undefined}>
-                  폴더 안으로 이동
-                </span>
-                <span className="tree-drop-pill" data-drop-mode={dropMode ?? undefined}>
-                  {dropTargetPath}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="tree-drop-line" data-drop-mode={dropMode ?? undefined} />
-                <span className="tree-drop-pill" data-drop-mode={dropMode ?? undefined}>
-                  {dropMode === "before" ? "이 앞에 배치" : "이 뒤에 배치"}
-                </span>
-              </>
-            )}
-          </>
+        {dropTargetPath && dropMode !== "inside" ? (
+          <span className="tree-drop-line" data-drop-mode={dropMode ?? undefined} />
         ) : null}
       </div>
 

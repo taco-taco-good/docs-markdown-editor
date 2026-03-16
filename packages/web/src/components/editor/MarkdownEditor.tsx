@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
@@ -116,9 +116,11 @@ interface MarkdownEditorProps {
 }
 
 export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps) {
-  const currentDoc = useDocumentStore((s) => s.currentDoc);
   const updateContent = useDocumentStore((s) => s.updateContent);
   const currentPath = useDocumentStore((s) => s.currentPath);
+  const editorSyncVersion = useDocumentStore((s) => s.editorSyncVersion);
+  const beginComposition = useDocumentStore((s) => s.beginComposition);
+  const endComposition = useDocumentStore((s) => s.endComposition);
   const showToast = useUIStore((s) => s.showToast);
   const outlineOpen = useUIStore((s) => s.outlineOpen);
 
@@ -134,6 +136,9 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
   const selectedSlashIndexRef = useRef(0);
   const outlineSignatureRef = useRef("");
   const activeOutlineRef = useRef<string | null>(null);
+  const composingRef = useRef(false);
+  const uiSyncFrameRef = useRef<number | null>(null);
+  const outlineSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const commands = slashCommands();
   const visibleCommands = slashState ? filterSlashCommands(commands, slashState.query) : [];
@@ -143,6 +148,7 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
 
   const doSyncOutline = (editorInstance: TiptapEditor) => {
     const items = collectOutlineItems(editorInstance);
+    const currentDoc = useDocumentStore.getState().currentDoc;
     const nextItems = items.length > 0
       ? items
       : currentDoc
@@ -174,6 +180,13 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
     syncTableTools(e, setTableToolsPosition);
   };
 
+  const syncTransientUi = (editorInstance: TiptapEditor) => {
+    doSyncSlash(editorInstance);
+    doSyncOutlineSelection(editorInstance);
+    syncSelectionToolbar(editorInstance, setSelectionToolbarPosition);
+    syncTableTools(editorInstance, setTableToolsPosition);
+  };
+
   const runSlashCommand = (command: SlashCommand) => {
     if (!editor || !slashStateRef.current) return;
     const range = slashStateRef.current;
@@ -185,17 +198,71 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
     setSelectedSlashIndex(0);
   };
 
+  const scheduleUiSync = (editorInstance: TiptapEditor) => {
+    if (uiSyncFrameRef.current !== null) {
+      cancelAnimationFrame(uiSyncFrameRef.current);
+    }
+    uiSyncFrameRef.current = requestAnimationFrame(() => {
+      uiSyncFrameRef.current = null;
+      startTransition(() => {
+        syncTransientUi(editorInstance);
+      });
+    });
+  };
+
+  const scheduleOutlineSync = (editorInstance: TiptapEditor, delayMs = 160) => {
+    if (outlineSyncTimeoutRef.current) {
+      clearTimeout(outlineSyncTimeoutRef.current);
+    }
+    outlineSyncTimeoutRef.current = setTimeout(() => {
+      outlineSyncTimeoutRef.current = null;
+      startTransition(() => {
+        doSyncOutline(editorInstance);
+      });
+    }, delayMs);
+  };
+
+  const flushEditorState = (editorInstance: TiptapEditor) => {
+    updateContent(serializeDocToMarkdown(editorInstance.schema, editorInstance.state.doc));
+    scheduleUiSync(editorInstance);
+    scheduleOutlineSync(editorInstance);
+  };
+
   const editor = useEditor({
     extensions: createEditorExtensions(),
     content: "",
     onCreate: ({ editor }) => syncAll(editor),
     onUpdate: ({ editor }) => {
-      updateContent(serializeDocToMarkdown(editor.schema, editor.state.doc));
-      syncAll(editor);
+      if (composingRef.current || editor.view.composing) {
+        return;
+      }
+      flushEditorState(editor);
     },
-    onSelectionUpdate: ({ editor }) => syncAll(editor),
+    onSelectionUpdate: ({ editor }) => {
+      if (composingRef.current || editor.view.composing) {
+        return;
+      }
+      scheduleUiSync(editor);
+    },
     editorProps: {
       attributes: { class: "docs-editor-content" },
+      handleDOMEvents: {
+        compositionstart: () => {
+          composingRef.current = true;
+          beginComposition();
+          return false;
+        },
+        compositionend: () => {
+          queueMicrotask(() => {
+            composingRef.current = false;
+            if (editor) {
+              flushEditorState(editor);
+            }
+            endComposition();
+          });
+          return false;
+        },
+      },
       handleDrop: (_view, event) => {
         const files = event.dataTransfer?.files;
         if (files?.length && currentPath) {
@@ -287,19 +354,33 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
 
   // Sync editor content when doc changes externally
   useEffect(() => {
-    if (editor && currentDoc) {
+    const latestDoc = useDocumentStore.getState().currentDoc;
+    if (editor && latestDoc) {
       try {
-        const nextDoc = parseMarkdownToDoc(editor.schema, currentDoc.content);
-        const currentSerialized = serializeDocToMarkdown(editor.schema, editor.state.doc);
-        if (currentSerialized !== currentDoc.content) {
-          replaceEditorContentPreservingSelection(editor, nextDoc.toJSON() as Record<string, unknown>);
+        const currentMarkdown = serializeDocToMarkdown(editor.schema, editor.state.doc);
+        if (currentMarkdown === latestDoc.content) {
+          syncAll(editor);
+          return;
         }
+        const nextDoc = parseMarkdownToDoc(editor.schema, latestDoc.content);
+        replaceEditorContentPreservingSelection(editor, nextDoc.toJSON() as Record<string, unknown>);
         syncAll(editor);
       } catch {
         showToast("지원되지 않는 구문이 있어 원문 편집기로 전환해야 합니다.", "error");
       }
     }
-  }, [editor, currentDoc?.content, currentPath, showToast]);
+  }, [editor, editorSyncVersion, showToast]);
+
+  useEffect(() => {
+    return () => {
+      if (uiSyncFrameRef.current !== null) {
+        cancelAnimationFrame(uiSyncFrameRef.current);
+      }
+      if (outlineSyncTimeoutRef.current) {
+        clearTimeout(outlineSyncTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Scroll-based outline tracking
   useEffect(() => {

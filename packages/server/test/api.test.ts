@@ -397,6 +397,7 @@ test("API exposes an authenticated event stream and supports moving markdown fil
         method: "PUT",
         headers: {
           "content-type": "application/json",
+          "x-client-id": "window-a",
           "x-session-id": sessionId,
         },
         body: JSON.stringify({
@@ -406,6 +407,10 @@ test("API exposes an authenticated event stream and supports moving markdown fil
       }),
     );
     assert.equal(createResponse.status, 201);
+
+    const syncEventPayload = await readUntil(reader, '"type":"doc:content"');
+    assert.match(syncEventPayload, /"originClientId":"window-a"/);
+    assert.match(syncEventPayload, /"frontmatter":\{[^}]*"title":"Sync"/);
 
     const moveResponse = await app.fetch(
       createRequest("/api/tree/move", {
@@ -515,6 +520,76 @@ test("moving a directory publishes a dir:moved event and keeps descendants reach
   } finally {
     await reader.cancel();
   }
+});
+
+test("PATCH rejects stale base revisions and returns the latest document snapshot", async () => {
+  const workspace = createWorkspace();
+  const app = createApiApp({ workspaceRoot: workspace });
+  app.authService.createLocalUser("alice", "correct horse battery staple", "Alice");
+
+  const loginResponse = await app.fetch(
+    createRequest("/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: "alice",
+        password: "correct horse battery staple",
+      }),
+    }),
+  );
+  assert.equal(loginResponse.status, 200);
+  const sessionId = (await loginResponse.json()).data.sessionId as string;
+
+  const createResponse = await app.fetch(
+    createRequest("/api/docs/guide%2Fconcurrency.md", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+      },
+      body: JSON.stringify({
+        content: "base\n",
+        frontmatter: { title: "Concurrency" },
+      }),
+    }),
+  );
+  assert.equal(createResponse.status, 201);
+  const created = await createResponse.json();
+  const baseRevision = created.data.meta.revision as string;
+
+  const freshPatch = await app.fetch(
+    createRequest("/api/docs/guide%2Fconcurrency.md", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+        "x-base-revision": baseRevision,
+      },
+      body: JSON.stringify({
+        content: "remote update\n",
+      }),
+    }),
+  );
+  assert.equal(freshPatch.status, 200);
+
+  const stalePatch = await app.fetch(
+    createRequest("/api/docs/guide%2Fconcurrency.md", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+        "x-base-revision": baseRevision,
+      },
+      body: JSON.stringify({
+        content: "stale local update\n",
+      }),
+    }),
+  );
+  assert.equal(stalePatch.status, 409);
+  const stalePayload = await stalePatch.json();
+  assert.equal(stalePayload.error.code, "VERSION_MISMATCH");
+  assert.equal(stalePayload.error.details.document.content, "remote update\n");
+  assert.notEqual(stalePayload.error.details.actualRevision, stalePayload.error.details.expectedRevision);
 });
 
 test("tree keeps custom sibling order and root moves after drag-style repositioning", async () => {

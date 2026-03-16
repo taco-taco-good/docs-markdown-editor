@@ -6,10 +6,11 @@ import { RawEditor } from "../editor/RawEditor";
 import { EditorToolbar } from "../editor/EditorToolbar";
 
 export function EditorLayout() {
-  const currentDoc = useDocumentStore((s) => s.currentDoc);
+  const hasCurrentDoc = useDocumentStore((s) => s.currentDoc !== null);
+  const supportedInWysiwyg = useDocumentStore((s) => s.currentDoc?.supportedInWysiwyg ?? false);
   const outlineOpen = useUIStore((s) => s.outlineOpen);
   const [outlinePortalHost, setOutlinePortalHost] = useState<HTMLDivElement | null>(null);
-  if (!currentDoc) {
+  if (!hasCurrentDoc) {
     return <EmptyState />;
   }
 
@@ -22,7 +23,7 @@ export function EditorLayout() {
           data-editor-scroll-container="true"
           style={{ background: "var(--color-surface-0)" }}
         >
-          {currentDoc.supportedInWysiwyg ? (
+          {supportedInWysiwyg ? (
             <MarkdownEditor outlinePortalHost={outlinePortalHost} />
           ) : (
             <RawEditor />
@@ -31,8 +32,8 @@ export function EditorLayout() {
         <div
           ref={setOutlinePortalHost}
           className="docs-editor-outline-dock"
-          data-open={currentDoc.supportedInWysiwyg && outlineOpen ? "true" : "false"}
-          aria-hidden={currentDoc.supportedInWysiwyg && outlineOpen ? "false" : "true"}
+          data-open={supportedInWysiwyg && outlineOpen ? "true" : "false"}
+          aria-hidden={supportedInWysiwyg && outlineOpen ? "false" : "true"}
         />
       </div>
     </div>
