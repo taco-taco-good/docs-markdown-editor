@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import { api } from "../../api/client";
@@ -110,7 +111,11 @@ function syncTableTools(
 
 // ── Component ──
 
-export function MarkdownEditor() {
+interface MarkdownEditorProps {
+  outlinePortalHost?: HTMLElement | null;
+}
+
+export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps) {
   const currentDoc = useDocumentStore((s) => s.currentDoc);
   const updateContent = useDocumentStore((s) => s.updateContent);
   const currentPath = useDocumentStore((s) => s.currentPath);
@@ -415,13 +420,19 @@ export function MarkdownEditor() {
         >
           <EditorContent editor={editor} />
         </div>
-        <OutlinePanel
-          items={outlineItems}
-          activeId={activeOutline}
-          isOpen={outlineOpen}
-          onItemClick={focusOutlineItem}
-        />
       </div>
+
+      {outlinePortalHost
+        ? createPortal(
+            <OutlinePanel
+              items={outlineItems}
+              activeId={activeOutline}
+              isOpen={outlineOpen}
+              onItemClick={focusOutlineItem}
+            />,
+            outlinePortalHost,
+          )
+        : null}
 
       {tableToolsPosition ? (
         <TableToolbar editor={editor} position={tableToolsPosition} />
