@@ -109,6 +109,22 @@ function syncTableTools(
   });
 }
 
+function scrollHeadingToTop(editor: TiptapEditor, target: HTMLElement) {
+  const scrollContainer = editor.view.dom.closest('[data-editor-scroll-container="true"]');
+  if (!(scrollContainer instanceof HTMLElement)) {
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const nextTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top) - 8;
+  scrollContainer.scrollTo({
+    top: Math.max(nextTop, 0),
+    behavior: "smooth",
+  });
+}
+
 // ── Component ──
 
 interface MarkdownEditorProps {
@@ -471,19 +487,25 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
   const desktopSelectionActions = formatActions.filter((a) => ["bold", "italic", "code", "link", "bullet", "task"].includes(a.id));
 
   const focusOutlineItem = (item: OutlineItem) => {
+    const target = editor.view.dom.querySelector<HTMLElement>(`[data-outline-id="${item.id}"]`)
+      ?? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2, h3, h4"))
+        .find((node) => node.textContent?.trim() === item.label);
+
     if (item.pos !== null) {
       const selection = TextSelection.create(editor.state.doc, item.pos);
       editor.view.dispatch(editor.state.tr.setSelection(selection).scrollIntoView());
       editor.commands.focus(item.pos);
       doSyncOutline(editor);
+      if (target instanceof HTMLElement) {
+        requestAnimationFrame(() => {
+          scrollHeadingToTop(editor, target);
+        });
+      }
       return;
     }
 
-    const target = editor.view.dom.querySelector<HTMLElement>(`[data-outline-id="${item.id}"]`)
-      ?? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2, h3, h4"))
-        .find((node) => node.textContent?.trim() === item.label);
     if (target instanceof HTMLElement) {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      scrollHeadingToTop(editor, target);
       target.focus?.();
     }
   };
