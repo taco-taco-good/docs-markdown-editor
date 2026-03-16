@@ -260,8 +260,34 @@ body {
 }
 
 .docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"] {
-  accent-color: var(--color-accent);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1em;
+  height: 1em;
   margin-top: 0.35em;
+  border: 1.5px solid var(--color-surface-5);
+  border-radius: 3px;
+  background: var(--color-surface-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"]:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 7px;
+  border: solid var(--color-surface-0);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 
 .docs-editor .tiptap table {
