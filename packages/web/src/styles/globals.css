@@ -942,9 +942,25 @@ body {
     display: none;
   }
 
-  .docs-editor-outline-dock,
-  .docs-editor-outline-panel {
-    display: none;
+  .docs-editor-outline-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    width: 0;
+    min-width: 0;
+    flex: none;
+    border-left: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    background: var(--color-surface-1);
+    transition: width 0.25s var(--ease-out-expo), min-width 0.25s var(--ease-out-expo);
+    overflow: hidden;
+  }
+
+  .docs-editor-outline-dock[data-open="true"] {
+    width: min(16rem, 75vw);
+    min-width: min(16rem, 75vw);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
   }
 
   .slash-menu {

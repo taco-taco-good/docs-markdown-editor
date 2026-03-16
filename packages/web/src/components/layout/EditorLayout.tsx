@@ -17,7 +17,7 @@ export function EditorLayout() {
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <EditorToolbar />
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 relative">
         <div
           className="flex-1 overflow-y-auto"
           data-editor-scroll-container="true"
