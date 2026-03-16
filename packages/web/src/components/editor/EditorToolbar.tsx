@@ -94,7 +94,7 @@ export function EditorToolbar() {
       {/* Outline toggle */}
       <button
         type="button"
-        className="hidden md:flex w-7 h-7 items-center justify-center rounded-md transition-colors"
+        className="flex w-7 h-7 items-center justify-center rounded-md transition-colors"
         style={{
           color: outlineOpen ? "var(--color-accent)" : "var(--color-text-muted)",
           background: outlineOpen ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
