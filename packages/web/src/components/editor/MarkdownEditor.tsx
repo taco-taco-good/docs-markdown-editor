@@ -304,6 +304,12 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
           const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\0", "\0");
           const taskMatch = /^-\[( |x|X)?\]$/.exec(textBefore);
           if (taskMatch && $from.parent.type.name !== "codeBlock") {
+            // Only convert when cursor is at the END of the pattern (right after ']').
+            // If there is text after the cursor, the user is editing mid-line — don't convert.
+            const textAfter = $from.parent.textBetween($from.parentOffset, $from.parent.content.size, "\0", "\0");
+            if (textAfter.length > 0) {
+              return false;
+            }
             event.preventDefault();
             const checked = taskMatch[1]?.toLowerCase() === "x";
             editor

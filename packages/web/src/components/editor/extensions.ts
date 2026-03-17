@@ -37,6 +37,39 @@ const ProductivityKeymap = Extension.create({
       "Mod-Shift-9": () => this.editor.commands.toggleTaskList(),
       "Mod-Shift-h": () => this.editor.commands.toggleHighlight(),
       "Shift-Enter": () => this.editor.commands.setHardBreak(),
+
+      // ── Backspace: Notion-style block demotion ──
+      // Heading → paragraph when cursor is at position 0
+      Backspace: () => {
+        const { selection } = this.editor.state;
+        if (!selection.empty) return false;
+
+        const { $from } = selection;
+        // Only act when cursor is at the very start of the textblock
+        if ($from.parentOffset !== 0) return false;
+
+        const node = $from.parent;
+
+        // Heading at pos 0 → convert to paragraph (Notion / Google Docs behavior)
+        if (node.type.name === "heading") {
+          return this.editor.commands.setNode("paragraph");
+        }
+
+        // Empty task item at pos 0 → lift out of task list
+        if (node.type.name === "paragraph" && $from.depth >= 2) {
+          const grandparent = $from.node(-1);
+          if (grandparent?.type.name === "taskItem") {
+            // If the task item text is empty, lift entirely out of the list
+            if (node.textContent.length === 0) {
+              return this.editor.commands.liftListItem("taskItem");
+            }
+            // If there is text but cursor is at start, also lift
+            return this.editor.commands.liftListItem("taskItem");
+          }
+        }
+
+        return false;
+      },
     };
   },
 });
