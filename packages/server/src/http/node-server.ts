@@ -132,7 +132,7 @@ export async function startApiServer(options: {
     res.setHeader("x-permitted-cross-domain-policies", "none");
     res.setHeader(
       "content-security-policy",
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
     );
 
     try {
