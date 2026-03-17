@@ -40,6 +40,7 @@ export interface ApiContext {
   realtimeService: RealtimeService;
   searchService: SearchService;
   templateService: TemplateService;
+  watcherService?: { suppressNextChange(filePath: string): void };
 }
 
 // ── Response helpers ──
@@ -94,10 +95,18 @@ export function getSessionIdFromRequest(request: Request): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function trustProxy(): boolean {
+  return process.env.TRUST_PROXY === "true";
+}
+
 export function getClientKey(request: Request): string {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip")?.trim();
-  return forwardedFor || realIp || "unknown";
+  if (trustProxy()) {
+    const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    const realIp = request.headers.get("x-real-ip")?.trim();
+    if (forwardedFor) return forwardedFor;
+    if (realIp) return realIp;
+  }
+  return "unknown";
 }
 
 export function getEditorClientIdFromRequest(request: Request): string | null {
@@ -106,8 +115,10 @@ export function getEditorClientIdFromRequest(request: Request): string | null {
 }
 
 export function requestIsSecure(request: Request): boolean {
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
-  if (forwardedProto === "https") return true;
+  if (trustProxy()) {
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+    if (forwardedProto === "https") return true;
+  }
   return new URL(request.url).protocol === "https:";
 }
 
@@ -214,7 +225,7 @@ export function mapError(error: unknown): Response {
     case "INVALID_MOVE":
       return errorResponse(400, "INVALID_MOVE", "Requested move is invalid");
     case "PATH_TRAVERSAL":
-      return errorResponse(400, "PATH_TRAVERSAL", "Invalid path");
+      return errorResponse(403, "PATH_TRAVERSAL", "Invalid path");
     case "UNAUTHORIZED":
       return errorResponse(401, "UNAUTHORIZED", "Authentication required");
     case "TOO_MANY_ATTEMPTS":
@@ -254,6 +265,11 @@ export function publishDocumentSnapshot(
   eventType: "file:created" | "file:updated",
   originClientId: string | null = null,
 ): void {
+  // Tell the watcher to skip the next change for this file — the save route
+  // already publishes a proper event with originClientId, so the watcher's
+  // duplicate broadcast (with originClientId: null) would cause a feedback loop.
+  ctx.watcherService?.suppressNextChange(path);
+
   const document = ctx.documentService.read(path);
   ctx.realtimeService.publish({ type: eventType, path });
   ctx.realtimeService.publish({

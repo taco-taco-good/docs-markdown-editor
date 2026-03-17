@@ -261,7 +261,10 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
               : null,
             isDirty: true,
             saveStatus: droppedRemoteChanges ? "conflict" : "idle",
-            editorSyncVersion: contentDidChange ? current.editorSyncVersion + 1 : current.editorSyncVersion,
+            // Never bump editorSyncVersion during merge — the editor owns its
+            // content while the user is active.  Replacing the full ProseMirror
+            // doc mid-edit causes cursor jumps and content overwrites.
+            // The merged content will reach the server on the next save cycle.
             hasPendingRemoteUpdate: false,
             pendingRemoteSnapshot: null,
           }));
@@ -367,9 +370,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         const nextContent = mergedContent.content;
         const droppedRemoteChanges =
           mergedContent.droppedRemoteChanges || mergedFrontmatter.droppedRemoteChanges;
-        const contentDidChange = nextContent !== requestedContent;
         const didChange =
-          contentDidChange ||
+          nextContent !== requestedContent ||
           mergedFrontmatter.frontmatter !== requestedFrontmatter;
 
         set((current) => ({
@@ -384,7 +386,9 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
             : null,
           isDirty: didChange,
           saveStatus: droppedRemoteChanges ? "conflict" : didChange ? "idle" : "saved",
-          editorSyncVersion: contentDidChange ? current.editorSyncVersion + 1 : current.editorSyncVersion,
+          // Do NOT bump editorSyncVersion here — let the editor keep its
+          // current ProseMirror state.  The store content is updated and the
+          // next onUpdate/save cycle will reconcile naturally.
           hasPendingRemoteUpdate: false,
           pendingRemoteSnapshot: null,
         }));
@@ -413,9 +417,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           mergedContent.droppedRemoteChanges || mergedFrontmatter.droppedRemoteChanges;
         const nextContent = mergedContent.content;
         const nextFrontmatter = parseFrontmatterSnapshot(mergedFrontmatter.frontmatter);
-        const contentDidChange = get().currentDoc?.content !== nextContent;
 
-        set((current) => ({
+        set(() => ({
           currentDoc: applyLocalSupport({
             ...latestDocument,
             meta: {
@@ -427,7 +430,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           saveStatus: droppedRemoteChanges ? "conflict" : "idle",
           lastSavedContent: latestDocument.content,
           lastSavedFrontmatter: latestFrontmatter,
-          editorSyncVersion: contentDidChange ? current.editorSyncVersion + 1 : current.editorSyncVersion,
+          // Do NOT bump editorSyncVersion during conflict resolution.
           hasPendingRemoteUpdate: false,
           pendingRemoteSnapshot: null,
         }));
@@ -498,6 +501,10 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     if (!state.currentDoc) return;
     const currentFrontmatter = JSON.stringify(state.currentDoc.meta.frontmatter);
 
+    // Also treat "saving" as busy — a save is in-flight and the response
+    // may update lastSavedContent, so applying now would race.
+    const effectivelyDirty = state.isDirty || state.saveStatus === "saving";
+
     const resolution = resolveRemoteUpdate({
       content,
       frontmatter: frontmatter ? JSON.stringify(frontmatter) : currentFrontmatter,
@@ -505,7 +512,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       currentFrontmatter,
       lastSavedContent: state.lastSavedContent,
       lastSavedFrontmatter: state.lastSavedFrontmatter,
-      isDirty: state.isDirty,
+      isDirty: effectivelyDirty,
       isComposing: state.isComposing,
       hasPendingRemoteUpdate: state.hasPendingRemoteUpdate,
       originClientId,
