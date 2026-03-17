@@ -3,11 +3,13 @@
 **Product Name:** Docs Markdown Editor
 **Status:** Draft
 **Date Created:** 2026-03-07
-**Last Updated:** 2026-03-07
-**Version:** 1.3
+**Last Updated:** 2026-03-17
+**Version:** 1.5
 **License:** MIT
 
 ---
+
+> **Implementation Snapshot (2026-03-17):** 현재 저장소에는 웹 UI, REST API, SSE 기반 변경 전파, 템플릿, 검색, 에셋 업로드, 로컬/OIDC 인증, PAT가 구현되어 있다. 독립 CLI, MCP 서버, Yjs/CRDT 동시편집, JWT 기반 멀티유저 인증, `config.yaml` 설정 파일은 이 문서에 포함된 로드맵/후속 설계 범위이며 아직 저장소에 구현되어 있지 않다.
 
 ## Executive Summary
 
@@ -16,7 +18,7 @@
 **Overview:**
 현재 시장에는 마크다운 문서를 웹에서 편집할 수 있는 서비스가 다수 존재하지만, "실제 .md 파일을 파일시스템에 저장하면서도 우수한 웹 편집 경험을 제공하고, AI Agent가 직접 문서를 편집할 수 있는" 서비스는 전무하다.
 
-Docs Markdown Editor는 이 세 가지 니즈의 교차점을 공략한다. 파일시스템의 마크다운 파일이 곧 데이터이며, 웹 에디터와 CLI/API를 통해 사람과 AI Agent 모두 동등하게 문서를 편집할 수 있다. 파일이 변경되면 웹에 즉시 반영되고, 웹에서 편집하면 즉시 파일에 저장된다. 특히 문서를 열기만 하거나 변경 없이 저장하는 경우 원본 마크다운이 손상되지 않는 `no-op roundtrip`을 최상위 품질 기준으로 둔다.
+Docs Markdown Editor는 이 세 가지 니즈의 교차점을 공략한다. 파일시스템의 마크다운 파일이 곧 데이터이며, 현재 구현 기준으로는 웹 에디터와 REST API, 그리고 파일 직접 편집을 통해 사람과 AI Agent 모두 문서를 편집할 수 있다. CLI/MCP는 후속 로드맵으로 유지한다. 파일이 변경되면 웹에 즉시 반영되고, 웹에서 편집하면 즉시 파일에 저장된다. 특히 문서를 열기만 하거나 변경 없이 저장하는 경우 원본 마크다운이 손상되지 않는 `no-op roundtrip`을 최상위 품질 기준으로 둔다.
 
 **Quick Facts:**
 - **Target Users:** AI Agent와 협업하는 개발자/팀, 마크다운 기반 지식 관리 조직
@@ -283,7 +285,7 @@ So that 어떤 도구로 편집하든 웹에서 최신 상태를 볼 수 있다.
 
 **Acceptance Criteria:**
 - [ ] 파일시스템 watcher가 .md 파일 변경을 500ms 이내에 감지
-- [ ] 변경 감지 시 웹 에디터에 실시간 반영 (WebSocket)
+- [ ] 변경 감지 시 웹 에디터에 실시간 반영 (SSE/EventSource)
 - [ ] 사용자가 웹에서 편집 중인 파일이 외부에서 변경된 경우, 충돌 알림 표시
 - [ ] 새 파일 생성/삭제도 실시간 감지하여 사이드바 업데이트
 - [ ] 대량 파일 변경 시 (git checkout 등) 성능 저하 없이 처리
@@ -650,13 +652,19 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 ## Scope
 
+### Current Repository Snapshot (2026-03-17)
+
+- 구현 완료: 웹 UI, REST API, SSE 기반 변경 전파, 파일 트리/드래그 앤 드롭, WYSIWYG + Raw 모드, 템플릿, 검색, 에셋 업로드, 로컬/OIDC 인증, PAT
+- 미구현: 독립 CLI 패키지, MCP 서버, Yjs/CRDT 동시편집, JWT 기반 멀티유저 인증, `config.yaml` 기반 설정 계층
+- 아래 Phase 정의는 제품 로드맵 기준이며, 현재 저장소 상태와 동일하다고 가정하면 안 된다.
+
 ### Phase 1: MVP (8주)
 
-**핵심:** 파일 기반 웹 편집 + AI Agent CLI/API/MCP
+**핵심:** 파일 기반 웹 편집 + REST API + 파일시스템 동기화
 
 - 파일시스템 기반 .md 파일 읽기/쓰기
 - 계층형 디렉토리 사이드바
-- WYSIWYG 마크다운 에디터 (Tiptap v3 기반)
+- WYSIWYG 마크다운 에디터 (Tiptap v2.11 기반)
 - Raw Markdown 모드 전환
 - no-op roundtrip 보장 (변경 없는 문서는 원문 유지)
 - 실시간 파일 변경 감지 및 웹 반영
@@ -708,23 +716,25 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 ### High-Level Architecture
 
+> 아래 다이어그램은 목표 아키텍처를 포함한다. 현재 저장소 기준 실제 인터페이스는 Web App + REST API + SSE + 파일 직접 편집이며, CLI/MCP는 아직 구현되지 않았다.
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    Clients                           │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Web App  │  │   CLI    │  │  AI Agent         │  │
-│  │ (Browser)│  │          │  │ (Claude/GPT/etc)  │  │
+│  │ Web App  │  │ Planned  │  │  AI Agent         │  │
+│  │ (Browser)│  │   CLI    │  │ (Claude/GPT/etc)  │  │
 │  └────┬─────┘  └────┬─────┘  └──┬────────────┬───┘  │
 │       │              │           │            │      │
-│       │ WebSocket    │ REST API  │ REST API   │ File │
-│       │ + HTTP       │           │ + MCP      │  I/O │
+│       │ SSE + HTTP   │ REST API  │ REST API   │ File │
+│       │              │ (planned) │ (+ MCP 예정)│  I/O │
 └───────┼──────────────┼───────────┼────────────┼──────┘
         │              │           │            │
 ┌───────▼──────────────▼───────────▼────────────│──────┐
 │                  Server                       │      │
 │  ┌─────────────────────────────────────────┐  │      │
 │  │            API Layer                     │  │      │
-│  │  REST API  │  WebSocket  │  MCP Server   │  │      │
+│  │  REST API  │     SSE     │  MCP Server   │  │      │
 │  └─────────────────┬───────────────────────┘  │      │
 │                    │                          │      │
 │  ┌─────────────────▼───────────────────────┐  │      │
@@ -761,8 +771,10 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
               │  │   └── notes/meeting-2026-03/            │
               │  │       └── photo.png                     │
               │  └── .docs/                                │
-              │      ├── search-index/  (검색 인덱스)       │
-              │      └── config.yaml    (서비스 설정)       │
+              │      ├── auth/          (users.db, app_config) │
+              │      ├── templates/     (문서 템플릿)          │
+              │      ├── audit/         (events.ndjson)        │
+              │      └── tree-order.json (트리 정렬 메타데이터) │
               └────────────────────────────────────────────┘
 ```
 
@@ -770,22 +782,22 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 **사람이 웹에서 편집할 때 (Phase 1):**
 ```
-Browser → HTTP/WS save trigger → File System write → fs event (무시, 자체 변경)
+Browser → HTTP PATCH/PUT → File System write → SSE publish → saving client self-echo suppression
 ```
 
 **AI Agent가 파일을 직접 편집할 때 (Phase 1):**
 ```
-Agent → File System write → fs watcher 감지 → WebSocket → Browser 반영
+Agent → File System write → fs watcher 감지 → SSE → Browser 반영
 ```
 
 **AI Agent가 API로 편집할 때 (Phase 1):**
 ```
-Agent → REST API/MCP → File System write + WebSocket → Browser 반영
+Agent → REST API → File System write + SSE → Browser 반영
 ```
 
 **동시 편집이 추가될 때 (Phase 2):**
 ```
-Browser/Agent → Yjs/CRDT merge → File System flush + WebSocket awareness sync
+Browser/Agent → Yjs/CRDT merge → File System flush + awareness sync
 ```
 
 ---
@@ -796,31 +808,31 @@ Browser/Agent → Yjs/CRDT merge → File System flush + WebSocket awareness syn
 
 **Frontend:**
 - React 19 + Vite
-- Tiptap v3 (ProseMirror 기반 WYSIWYG 에디터)
+- Tiptap v2.11 (ProseMirror 기반 WYSIWYG 에디터)
 - Tailwind CSS
 - Yjs는 Phase 2 협업 기능에서만 사용
 - Raw 모드를 항상 source-of-truth escape hatch로 유지
 
 **Backend:**
-- Bun runtime
-- Hono (경량 고성능 HTTP 프레임워크)
-- chokidar (파일시스템 watching)
-- MCP SDK
+- Node.js v25+ (네이티브 TS 실행)
+- node:http 기반 커스텀 HTTP 서버 (프레임워크 없음)
+- 커스텀 폴링 기반 파일 감시 (500ms 간격)
+- SSE (Server-Sent Events) 실시간 이벤트 스트림
 - 로컬 계정 + OIDC(Authentik 호환) 인증 서비스
+- `node:sqlite` 기반 인증 DB
+- MCP SDK는 Phase 2 이후 도입 예정
 - Yjs server (y-websocket)는 Phase 2에서 도입
 
 **Search:**
-- FlexSearch 기반 전문 검색
-- 한글/CJK는 n-gram fallback 검색 경로 추가
+- 외부 라이브러리 없이 자체 구현 (ASCII 토큰 + CJK 2/3-gram)
 - Phase 2에서 필요 시 Meilisearch 또는 전용 형태소 검색으로 교체
 
 **CLI:**
-- Bun + Commander.js 기반
+- Phase 2 이후 구현 예정
 
 **Infrastructure:**
-- 단일 바이너리 배포 목표 (`bun build --compile`)
-- Docker 이미지
-- 설정 파일: `.docs/config.yaml`
+- Docker 이미지 배포
+- 환경변수 기반 설정 (.env)
 
 ### API Design
 
@@ -834,23 +846,43 @@ DELETE /api/docs/:path          # 문서 삭제
 # Directory
 GET    /api/tree                # 전체 디렉토리 트리
 GET    /api/tree/:path          # 하위 디렉토리 트리
+POST   /api/tree/dirs           # 디렉토리 생성
+POST   /api/tree/move           # 파일/폴더 이동
+DELETE /api/tree/dirs/:path     # 디렉토리 삭제
 
 # Search
 POST   /api/search              # 전문 검색
-  body: { "query": "...", "path": "...", "limit": 20 }
+  body: { "query": "...", "limit": 20 }
 
-# WebSocket
-WS     /ws/doc/:path            # 실시간 편집 동기화
-WS     /ws/tree                 # 파일 트리 변경 알림
+# Templates
+GET    /api/templates
+GET    /api/templates/:name
+POST   /api/templates
+PATCH  /api/templates/:name
+DELETE /api/templates/:name
 
-# MCP
-POST   /mcp                     # MCP JSON-RPC endpoint
+# Assets
+POST   /api/assets/:docPath     # 문서별 asset 업로드
+GET    /api/assets/:assetPath   # asset 다운로드
+
+# SSE
+GET    /api/events              # 실시간 파일/문서 변경 이벤트 스트림
+GET    /api/info                # workspace 정보
+
+# Planned
+# CLI / MCP는 후속 범위이며 현재 저장소 라우트에는 없음
 
 # Auth
+GET    /auth/status             # 초기화 상태 확인
+POST   /auth/setup              # 로컬/OIDC 초기 설정
 POST   /auth/login              # 로컬 ID/PW 로그인
-GET    /auth/oidc/:provider     # OIDC 로그인 시작
-GET    /auth/callback/:provider # OIDC 콜백
-POST   /auth/tokens             # PAT 발급/회수
+GET    /auth/session            # 현재 세션 확인
+POST   /auth/logout             # 로그아웃
+GET    /auth/oidc/authorize     # OIDC 로그인 시작
+GET    /auth/oidc/callback      # OIDC 콜백
+GET    /auth/tokens             # PAT 목록
+POST   /auth/tokens             # PAT 발급
+DELETE /auth/tokens/:tokenId    # PAT 회수
 ```
 
 ### Security Requirements
@@ -868,7 +900,7 @@ POST   /auth/tokens             # PAT 발급/회수
 |------|--------|----------|
 | 에디터 초기 로딩 | < 2초 | 100KB .md 파일 |
 | 파일 저장 (웹 → fs) | < 300ms | debounce 포함 |
-| 파일 변경 감지 (fs → 웹) | < 500ms | chokidar 이벤트 |
+| 파일 변경 감지 (fs → 웹) | < 500ms | 폴링 간격 기준 |
 | 검색 응답 | < 200ms | 1만 문서, p95 |
 | 디렉토리 트리 로딩 | < 1초 | 1만 파일 |
 | 동시 편집 동기화 | < 100ms | 같은 서버 내 |
@@ -980,7 +1012,7 @@ POST   /auth/tokens             # PAT 발급/회수
 ### Dependencies
 
 **Internal:**
-- [ ] Tiptap v3 안정성 검증 + Markdown roundtrip PoC (Week 1)
+- [ ] Tiptap v2.11 안정성 검증 + Markdown roundtrip PoC (Week 1)
 - [ ] Yjs CRDT 라이브러리 파일시스템 동기화 PoC (Phase 2 진입 전)
 - [ ] Markdown ↔ ProseMirror 변환 품질 검증
 - [ ] no-op roundtrip golden file 테스트셋 구축
@@ -988,28 +1020,28 @@ POST   /auth/tokens             # PAT 발급/회수
 
 **External:**
 - [ ] MCP 프로토콜 사양 안정화 (현재 진행 중)
-- [ ] Bun + chokidar의 OS별 안정성
+- [ ] Node.js v25+ 네이티브 TS 실행의 OS별 안정성
 
 ### Assumptions
 
 - 사용자는 서버가 실행되는 머신에 파일시스템 접근 권한이 있음
 - 초기 타겟은 self-hosted (로컬 또는 팀 서버)
 - .md 파일은 UTF-8 인코딩
-- 사용자의 브라우저는 WebSocket을 지원함
+- 사용자의 브라우저는 SSE (EventSource)를 지원함
 - AI Agent는 CLI 실행 또는 HTTP 호출이 가능한 환경
 
 ---
 
 ## Resolved Decisions
 
-- [x] **에디터 라이브러리:** Tiptap v3 + 커스텀 Markdown 변환 레이어 (remark 기반)
-  - Week 1에 roundtrip PoC 필수. 문제 시 커스텀 시리얼라이저로 보완
+- [x] **에디터 라이브러리:** Tiptap v2.11 + 커스텀 Markdown 파서/시리얼라이저
+  - tiptap-markdown 기반 커스텀 구현으로 roundtrip 품질 확보
 
 - [x] **라이선스 모델:** MIT
   - 오픈소스 프로젝트. 수익 모델 고려 안 함
 
-- [x] **런타임/프레임워크:** Bun + Hono + React + Vite
-  - 제품 계획과 기술 설계의 구현 기준 스택으로 확정
+- [x] **런타임/프레임워크:** Node.js v25+ + node:http + React + Vite
+  - 프레임워크 없이 native Request/Response API 사용, 최소 의존성
 
 - [x] **인증 모델:** 로컬 ID/PW + OIDC(Authentik 호환)
   - 웹은 세션 로그인, CLI/API/MCP는 사용자별 PAT 사용
@@ -1018,8 +1050,8 @@ POST   /auth/tokens             # PAT 발급/회수
   - 구조: `.assets/{문서경로}/{문서명}/파일명`
   - 문서 내 마크다운 링크로 참조: `![alt](/.assets/docs/guide/intro/screenshot.png)`
 
-- [x] **검색 전략:** FlexSearch + 한글/CJK n-gram fallback
-  - 영문권 검색 성능은 유지하고, CJK는 별도 fallback 경로로 품질 보완
+- [x] **검색 전략:** 자체 구현 (ASCII 토큰 + CJK 2/3-gram)
+  - 외부 라이브러리 없이 구현. 영문 단어 매칭 + CJK n-gram 병행
 
 - [x] **Frontmatter 처리 정책:** 템플릿 기반 삽입 + 명시적 편집만 허용
   - 일반 본문 저장 시 frontmatter를 자동 갱신하지 않음
@@ -1084,13 +1116,14 @@ MVP를 안전하게 시작하기 위해 Week 1에서 아래 구현 명세를 고
 
 ### 3. Korean Search Contract
 
-- 검색 엔진 기본축은 FlexSearch다.
-- 한글/CJK가 포함된 문서와 질의는 별도 n-gram fallback 경로를 사용한다.
+- 검색은 외부 라이브러리 없이 자체 구현한다.
+- ASCII/영문은 소문자 단어 토큰(`/[a-z0-9]+/g`)으로 인덱싱한다.
+- 한글/CJK가 포함된 문서와 질의는 n-gram 토큰 경로를 사용한다.
 - MVP 기본값은 `2-gram`이며, 긴 질의(4자 이상)는 `3-gram`도 병행한다.
 - 결과 병합 시:
   - 동일 문서는 하나로 합친다.
-  - CJK fallback hit는 영문 FlexSearch hit보다 낮은 기본 가중치로 시작한다.
   - 제목 hit는 본문 hit보다 높은 가중치를 가진다.
+  - 경로 매칭도 점수에 반영한다.
 - MVP 성공 기준은 “정확한 형태소 분석”이 아니라 “한글 부분 검색이 실패하지 않는 것”이다.
 
 ---
@@ -1114,3 +1147,5 @@ MVP를 안전하게 시작하기 위해 Week 1에서 아래 구현 명세를 고
 | 1.1 | 2026-03-07 | 5대 의사결정 확정: Tiptap v3, MIT, 전역 .assets/, Frontmatter 적극적 파싱+템플릿, Self-hosted only |
 | 1.2 | 2026-03-07 | PRD를 TECH-DESIGN과 정합화: Bun/Hono/React 스택 확정, MCP를 Phase 1 후반으로 배치, CRDT를 Phase 2로 분리, PATCH 의미 명확화 |
 | 1.3 | 2026-03-07 | 인증(local + OIDC), 한글/CJK fallback 검색, no-op roundtrip 최우선 원칙 반영. frontmatter 자동 갱신 제거 |
+| 1.4 | 2026-03-17 | 실제 구현에 맞춰 스택 정보 수정: Bun→Node.js, Hono→node:http, chokidar→커스텀 폴링, FlexSearch→자체 구현, Tiptap v3→v2.11, WebSocket→SSE |
+| 1.5 | 2026-03-17 | 현재 구현 스냅샷을 추가하고, 아키텍처/API 서술에서 구현 완료 범위와 로드맵 범위를 분리 |
