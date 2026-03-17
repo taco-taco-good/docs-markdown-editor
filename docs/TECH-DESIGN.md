@@ -1,13 +1,13 @@
 # Technical Design Document: Docs Markdown Editor
 
-**Version:** 1.3
-**Date:** 2026-03-07
+**Version:** 1.5
+**Date:** 2026-03-17
 **Status:** Draft
-**Refs:** [PRD.md](./PRD.md) | [DECISIONS.md](./DECISIONS.md)
+**Refs:** [PRD.md](./PRD.md)
 
 ---
 
-> **Planning baseline:** 이 문서는 전체 목표 아키텍처를 설명한다. 구현 우선순위는 Phase 1에서 단일 사용자 편집, 파일 동기화, CLI/REST/MCP, 검색, frontmatter/templates, local/OIDC 인증을 제공하고, Phase 2에서 Yjs 기반 동시 편집/JWT/백링크를 추가하는 기준으로 읽는다. 최상위 무결성 원칙은 `no-op roundtrip`이며, 변경 없이 열린 문서는 원문 markdown이 그대로 유지되어야 한다.
+> **Planning baseline:** 이 문서는 현재 구현과 목표 아키텍처를 함께 설명한다. 현재 저장소에는 REST/SSE 기반 단일 사용자 편집, 파일 동기화, 검색, frontmatter/templates, local/OIDC 인증, PAT가 구현되어 있다. 아래 CLI/MCP/Yjs/JWT 관련 내용은 후속 설계 초안으로 읽어야 한다. 최상위 무결성 원칙은 `no-op roundtrip`이며, 변경 없이 열린 문서는 원문 markdown이 그대로 유지되어야 한다.
 
 ## Table of Contents
 
@@ -17,8 +17,8 @@
 4. [Backend Architecture](#4-backend-architecture)
 5. [Frontend Architecture](#5-frontend-architecture)
 6. [Core Flows](#6-core-flows)
-7. [CLI Design](#7-cli-design)
-8. [MCP Server Design](#8-mcp-server-design)
+7. [CLI Design (Planned)](#7-cli-design-planned)
+8. [MCP Server Design (Planned)](#8-mcp-server-design-planned)
 9. [Build, Deploy & Dev Environment](#9-build-deploy--dev-environment)
 10. [Phase 2-3 Preview](#10-phase-2-3-preview)
 
@@ -30,59 +30,37 @@
 
 | Layer | Technology | Version | Rationale |
 |-------|-----------|---------|-----------|
-| **Runtime** | **Bun** | v1.2+ | 파일 I/O 3~5x 빠름, WebSocket 내장, TS 네이티브, 단일 바이너리 컴파일 |
-| **Package Manager** | Bun (내장) | - | 런타임과 통합, 별도 도구 불필요 |
-| **Language** | TypeScript | v5.5+ | Bun이 네이티브 실행 (트랜스파일러 불필요) |
-| **Monorepo** | Bun workspace | - | package.json `workspaces` 필드 사용 |
-| **HTTP Framework** | Hono | v4+ | Bun을 1급 런타임으로 공식 지원, 경량(14KB) |
-| **WebSocket** | Bun.serve() 내장 | - | 별도 패키지 불필요, 네이티브 성능 |
-| **File Watcher** | chokidar | v5+ | 30M+ repos 사용, cross-platform 안정성 최고 |
-| **Editor** | Tiptap v3 | v3+ | ProseMirror 기반, Yjs 통합 성숙 |
-| **Markdown** | @tiptap/markdown | - | 공식 MD 파서/시리얼라이저 (MarkedJS 기반) |
+| **Runtime** | **Node.js** | v25+ | 네이티브 TS 실행 지원, npm 생태계 100% 호환 |
+| **Package Manager** | npm | - | Node.js 기본 패키지 매니저 |
+| **Language** | TypeScript | v5.7+ | Node.js v25+ 네이티브 실행 (별도 트랜스파일러 불필요) |
+| **Monorepo** | npm workspace (부분) | - | `packages/web`에 별도 의존성, 루트에서 스크립트 통합 |
+| **HTTP Server** | node:http (native) | - | 프레임워크 없이 Request/Response API 직접 구현, 최소 의존성 |
+| **Realtime** | SSE (Server-Sent Events) | - | 단방향 이벤트 스트림, WebSocket보다 단순하고 HTTP 호환 |
+| **File Watcher** | Custom polling | - | setInterval 기반 500ms 폴링, 스냅샷 비교로 변경 감지 |
+| **Editor** | Tiptap | v2.11+ | ProseMirror 기반, 풍부한 확장 생태계 |
+| **Markdown** | Custom parser/serializer | - | tiptap-markdown 기반 커스텀 구현 (task list, frontmatter 등) |
 | **CRDT** | Yjs | v13+ | Phase 2 동시편집용, Phase 1에서는 미사용 |
 | **Frontend** | React | v19+ | Tiptap 공식 지원, 커뮤니티 최대 |
-| **Bundler** | Vite | v6+ | 프론트엔드 HMR. 서버/CLI는 `bun build` 사용 |
+| **Bundler** | Vite | v6+ | 프론트엔드 HMR 및 프로덕션 빌드 |
 | **CSS** | Tailwind CSS | v4+ | 유틸리티 퍼스트, 빠른 UI 개발 |
-| **Search** | FlexSearch + CJK n-gram fallback | v0.7+ | 영문 검색 성능 유지 + 한글/CJK 검색 품질 보완 |
+| **Search** | Custom (ASCII + CJK n-gram) | - | 외부 라이브러리 없이 자체 구현, ASCII 토큰 + 2/3-gram CJK 검색 |
 | **Auth** | Local credentials + OIDC | - | 자체 ID/PW와 Authentik 호환 외부 로그인 지원 |
-| **CLI** | Commander.js | v12+ | CLI 표준 |
-| **MCP SDK** | @modelcontextprotocol/sdk | latest | 공식 TypeScript SDK |
-| **Test** | bun:test | - | Bun 내장 테스트 러너, Jest 호환 API |
-| **Lint** | Biome | v1+ | ESLint+Prettier 대체, 단일 도구 |
+| **Database** | node:sqlite | - | 인증 세션, 사용자 정보 저장 |
+| **Test** | node:test (내장) | - | Node.js 내장 테스트 러너, `--test` 플래그 사용 |
 
-### Bun 선택 이유 (vs Node.js)
+### Node.js 선택 이유
 
-| 기준 | Bun | Node.js |
-|------|-----|---------|
-| **파일 I/O** | Bun.file(), Bun.write() - **3~5x 빠름** | fs.readFile, fs.writeFile |
-| **기동 속도** (CLI) | **~10ms** | ~100ms |
-| **WebSocket** | **내장** (Bun.serve) | ws 패키지 필요 |
-| **TypeScript** | **네이티브 실행** | tsx/ts-node 필요 |
-| **단일 바이너리** | **`bun build --compile`** | 실험적 (pkg) |
-| **번들러** | **내장** (bun build) | tsup/esbuild 별도 |
-| **npm 호환** | ~97% (대부분 문제 없음) | 100% |
-| **테스트 러너** | **내장** (bun:test) | vitest/jest 별도 |
-| **Docker 이미지** | **~100MB** (oven/bun:alpine) | ~180MB (node:alpine) |
+| 기준 | 선택 |
+|------|------|
+| **npm 호환** | 100% — 모든 npm 패키지 호환 |
+| **TypeScript** | v25+에서 네이티브 실행 (--experimental-strip-types) |
+| **안정성** | LTS 지원, 프로덕션 검증된 런타임 |
+| **테스트 러너** | 내장 `node:test` — 별도 프레임워크 불필요 |
+| **Docker 이미지** | ~180MB (node:alpine) |
 
-Tiptap 팀이 실제로 Node/Hono → Bun 마이그레이션 후 47% 성능 향상을 보고함.
+### 프레임워크 미사용 이유
 
-### Hono 유지 이유
-
-Hono는 Bun을 1급 런타임으로 공식 지원하며, `Bun.serve()`와 네이티브 통합됨.
-Bun 환경에서 Hono는 가장 빠른 HTTP 프레임워크 조합.
-
-### 호환성 검증 결과
-
-| 라이브러리 | Bun 호환 | 비고 |
-|-----------|:--------:|------|
-| Tiptap v3 | O | Tiptap 팀이 Bun 마이그레이션 실증 |
-| Yjs | O | 순수 JS, 런타임 무관 |
-| Hono | O | Bun 1급 지원 |
-| FlexSearch | O | 순수 JS, CJK는 커스텀 토크나이징/fallback 필요 |
-| MCP SDK | O | TypeScript, Bun TS 네이티브 |
-| chokidar v5 | O | Node API 사용, Bun 호환 (비호환 시 @parcel/watcher로 대체) |
-| Commander.js | O | 순수 JS |
-| yaml | O | 순수 JS |
+HTTP 서버는 `node:http`의 `createServer`를 직접 사용한다. Web-standard `Request`/`Response` API로 변환하여 라우팅하며, 프레임워크 의존성을 제거하여 런타임 오버헤드를 최소화했다. 라우팅은 `pathname` 기반 수동 매칭으로, 프로젝트 규모에 적합한 단순한 구조를 유지한다.
 
 ---
 
@@ -95,144 +73,133 @@ docs-markdown-editor/
 ├── packages/
 │   ├── server/                 # 백엔드 서버
 │   │   ├── src/
-│   │   │   ├── index.ts                 # 엔트리포인트
-│   │   │   ├── app.ts                   # Hono 앱 설정
-│   │   │   ├── routes/
-│   │   │   │   ├── docs.ts              # GET/PUT/PATCH/DELETE /api/docs
-│   │   │   │   ├── tree.ts              # GET /api/tree
-│   │   │   │   ├── search.ts            # POST /api/search
-│   │   │   │   ├── assets.ts            # POST /api/assets (이미지 업로드)
-│   │   │   │   ├── templates.ts         # GET /api/templates
-│   │   │   │   └── auth.ts              # POST /auth/login, OIDC, PAT
+│   │   │   ├── index.ts                 # 서비스 re-export 엔트리포인트
+│   │   │   ├── http/
+│   │   │   │   ├── node-server.ts       # node:http 서버, 정적 파일 서빙
+│   │   │   │   ├── api.ts               # Request/Response 기반 라우터
+│   │   │   │   ├── api-helpers.ts       # 응답 헬퍼, 인증, 에러 매핑
+│   │   │   │   └── routes/
+│   │   │   │       ├── docs.routes.ts   # GET/PUT/PATCH/DELETE /api/docs
+│   │   │   │       ├── tree.routes.ts   # GET /api/tree
+│   │   │   │       ├── auth.routes.ts   # /auth/login, /auth/setup, OIDC
+│   │   │   │       ├── assets.routes.ts # POST /api/assets (이미지 업로드)
+│   │   │   │       └── templates.routes.ts # GET /api/templates
 │   │   │   ├── services/
 │   │   │   │   ├── document.service.ts  # 문서 CRUD 비즈니스 로직
-│   │   │   │   ├── watcher.service.ts   # chokidar 파일 감시
-│   │   │   │   ├── search.service.ts    # FlexSearch 인덱싱/검색
+│   │   │   │   ├── watcher.service.ts   # 폴링 기반 파일 감시 (500ms)
+│   │   │   │   ├── realtime.service.ts  # SSE 이벤트 스트림 관리
+│   │   │   │   ├── search.service.ts    # 커스텀 검색 (ASCII + CJK n-gram)
 │   │   │   │   ├── template.service.ts  # 템플릿 관리
-│   │   │   │   ├── frontmatter.service.ts # YAML frontmatter 파싱/쓰기
 │   │   │   │   ├── asset.service.ts     # .assets/ 파일 관리
-│   │   │   │   ├── auth.service.ts      # local/OIDC 인증, PAT 발급
+│   │   │   │   ├── auth.service.ts      # local/OIDC 인증, 세션, PAT
+│   │   │   │   ├── oidc.service.ts      # OIDC discovery/callback 처리
+│   │   │   │   ├── token.service.ts     # Personal Access Token 관리
+│   │   │   │   ├── login-throttle.ts    # 로그인 시도 rate limiting
 │   │   │   │   └── audit.service.ts     # 편집자 식별/감사 로그
-│   │   │   ├── ws/
-│   │   │   │   ├── handler.ts           # WebSocket 연결 관리
-│   │   │   │   └── events.ts            # 이벤트 타입 정의
-│   │   │   ├── mcp/
-│   │   │   │   ├── server.ts            # MCP Server 설정
-│   │   │   │   ├── tools.ts             # MCP Tools 정의
-│   │   │   │   └── resources.ts         # MCP Resources 정의
-│   │   │   ├── middleware/
-│   │   │   │   ├── auth.ts              # 세션/PAT 인증
-│   │   │   │   ├── rate-limit.ts        # Rate limiting
-│   │   │   │   └── security.ts          # Path traversal 방지
 │   │   │   └── lib/
-│   │   │       ├── workspace.ts         # workspace 경로 관리
-│   │   │       ├── markdown.ts          # MD 파싱/시리얼라이즈 유틸
-│   │   │       └── config.ts            # .docs/config.yaml 로더
-│   │   ├── package.json
-│   │   └── tsconfig.json
+│   │   │       ├── workspace.ts         # workspace 경로 관리, path traversal 방지
+│   │   │       ├── sqlite.ts            # node:sqlite DB 초기화
+│   │   │       ├── tree-builder.ts      # 파일 트리 구조 생성
+│   │   │       └── tree-order.ts        # 트리 정렬 순서 관리
+│   │   └── test/
+│   │       ├── api.test.ts
+│   │       ├── login-throttle.test.ts
+│   │       ├── token.service.test.ts
+│   │       └── tree-order.test.ts
 │   │
 │   ├── web/                    # 프론트엔드 웹앱
 │   │   ├── src/
 │   │   │   ├── main.tsx                 # React 엔트리
-│   │   │   ├── App.tsx                  # 루트 컴포넌트
+│   │   │   ├── App.tsx                  # 루트 컴포넌트 (라우팅)
 │   │   │   ├── components/
 │   │   │   │   ├── layout/
 │   │   │   │   │   ├── Sidebar.tsx          # 디렉토리 트리 사이드바
-│   │   │   │   │   ├── Header.tsx           # 상단 바 (검색, 설정)
-│   │   │   │   │   └── EditorLayout.tsx     # 에디터 레이아웃
+│   │   │   │   │   ├── Header.tsx           # 상단 바 (문서명, 상태, 설정)
+│   │   │   │   │   ├── EditorLayout.tsx     # 에디터 레이아웃
+│   │   │   │   │   ├── CreateDocumentModal.tsx
+│   │   │   │   │   ├── CreateFolderModal.tsx
+│   │   │   │   │   └── TemplateManagerModal.tsx
 │   │   │   │   ├── editor/
-│   │   │   │   │   ├── MarkdownEditor.tsx   # Tiptap 에디터 래퍼
+│   │   │   │   │   ├── MarkdownEditor.tsx   # Tiptap WYSIWYG 에디터
 │   │   │   │   │   ├── RawEditor.tsx        # Raw markdown 모드
 │   │   │   │   │   ├── EditorToolbar.tsx    # 포맷팅 툴바
-│   │   │   │   │   ├── SlashMenu.tsx        # 슬래시 커맨드 메뉴
-│   │   │   │   │   ├── FrontmatterPanel.tsx # Frontmatter 편집 UI
-│   │   │   │   │   └── ImageUploader.tsx    # 이미지 드래그앤드롭
+│   │   │   │   │   ├── extensions.ts        # 커스텀 Tiptap 확장/키맵
+│   │   │   │   │   ├── editor-sync.ts       # 실시간 동기화 로직
+│   │   │   │   │   ├── slash-commands.ts    # 슬래시 커맨드 정의
+│   │   │   │   │   ├── outline.ts           # 문서 아웃라인 추출
+│   │   │   │   │   └── components/
+│   │   │   │   │       ├── OutlinePanel.tsx  # 목차 패널
+│   │   │   │   │       ├── SlashMenu.tsx     # 슬래시 커맨드 메뉴
+│   │   │   │   │       ├── SelectionToolbar.tsx # 선택 영역 툴바
+│   │   │   │   │       └── TableToolbar.tsx  # 테이블 편집 툴바
 │   │   │   │   ├── tree/
 │   │   │   │   │   ├── FileTree.tsx         # 파일 트리
 │   │   │   │   │   ├── TreeNode.tsx         # 개별 노드 (파일/폴더)
-│   │   │   │   │   └── TreeContextMenu.tsx  # 우클릭 메뉴
-│   │   │   │   └── search/
-│   │   │   │       ├── SearchModal.tsx      # Cmd+P 검색 모달
-│   │   │   │       └── SearchResult.tsx     # 검색 결과 아이템
+│   │   │   │   │   └── drag-source.ts       # 드래그 앤 드롭 소스
+│   │   │   │   ├── auth/
+│   │   │   │   │   ├── LoginPage.tsx        # 로그인 페이지
+│   │   │   │   │   └── SetupPage.tsx        # 초기 설정 페이지
+│   │   │   │   ├── search/
+│   │   │   │   │   └── SearchModal.tsx      # Cmd+K 검색 모달
+│   │   │   │   └── settings/
+│   │   │   │       └── SettingsPage.tsx     # 설정 페이지
 │   │   │   ├── hooks/
-│   │   │   │   ├── useEditor.ts             # Tiptap 에디터 훅
-│   │   │   │   ├── useWebSocket.ts          # WS 연결/메시지 관리
-│   │   │   │   ├── useFileTree.ts           # 파일 트리 상태
-│   │   │   │   ├── useDocument.ts           # 문서 로드/저장
+│   │   │   │   ├── useWebSocket.ts          # SSE 이벤트 스트림 연결
 │   │   │   │   └── useSearch.ts             # 검색 상태
 │   │   │   ├── stores/
-│   │   │   │   ├── document.store.ts        # 현재 문서 상태
+│   │   │   │   ├── document.store.ts        # 현재 문서 상태 (Zustand)
+│   │   │   │   ├── document-sync.ts         # 원격 업데이트 해결 로직
 │   │   │   │   ├── tree.store.ts            # 파일 트리 상태
+│   │   │   │   ├── auth.store.ts            # 인증 상태
 │   │   │   │   └── ui.store.ts              # UI 상태 (사이드바, 모달)
 │   │   │   ├── api/
 │   │   │   │   └── client.ts                # REST API 클라이언트
 │   │   │   ├── lib/
-│   │   │   │   ├── tiptap-extensions.ts     # 커스텀 Tiptap 확장
-│   │   │   │   └── keybindings.ts           # 단축키 정의
+│   │   │   │   ├── tiptap-markdown.ts       # 커스텀 MD 파서/시리얼라이저
+│   │   │   │   ├── markdown-support.ts      # WYSIWYG 지원 여부 판별
+│   │   │   │   ├── path-utils.ts            # 경로 유틸
+│   │   │   │   ├── tree-dnd.ts              # 트리 드래그 앤 드롭
+│   │   │   │   ├── tree-selection.ts        # 트리 선택 상태
+│   │   │   │   └── editor-client.js         # 에디터 클라이언트 ID 생성
 │   │   │   └── styles/
-│   │   │       ├── globals.css              # Tailwind + 글로벌 스타일
-│   │   │       └── editor.css               # 에디터 전용 스타일
+│   │   │       └── globals.css              # Tailwind + 글로벌 스타일
 │   │   ├── index.html
 │   │   ├── vite.config.ts
-│   │   ├── tailwind.config.ts
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── cli/                    # CLI 도구
-│   │   ├── src/
-│   │   │   ├── index.ts                 # CLI 엔트리
-│   │   │   ├── commands/
-│   │   │   │   ├── create.ts
-│   │   │   │   ├── read.ts
-│   │   │   │   ├── edit.ts
-│   │   │   │   ├── delete.ts
-│   │   │   │   ├── list.ts
-│   │   │   │   ├── search.ts
-│   │   │   │   ├── move.ts
-│   │   │   │   └── init.ts             # workspace 초기화
-│   │   │   └── lib/
-│   │   │       ├── api-client.ts        # 서버 API 호출
-│   │   │       └── output.ts            # JSON/텍스트 출력 포맷터
-│   │   ├── package.json
-│   │   └── tsconfig.json
+│   │   └── package.json
 │   │
 │   └── shared/                 # 공유 타입/유틸
-│       ├── src/
-│       │   ├── types.ts                 # 공유 타입 정의
-│       │   ├── constants.ts             # 상수
-│       │   ├── frontmatter.ts           # Frontmatter 스키마/파서
-│       │   └── paths.ts                 # 경로 유틸
-│       ├── package.json
-│       └── tsconfig.json
+│       └── src/
+│           ├── frontmatter.ts           # Frontmatter 타입/파서
+│           └── markdown-document.ts     # Markdown 문서 유틸
 │
 ├── docs/                       # 프로젝트 문서
 │   ├── PRD.md
-│   ├── DECISIONS.md
 │   └── TECH-DESIGN.md
 │
-├── package.json                # 루트 (workspaces, scripts)
-├── bunfig.toml                 # Bun 설정
-├── tsconfig.base.json          # 공유 TS 설정
-├── biome.json                  # Lint/Format 설정
-├── Dockerfile
-├── docker-compose.yml
+├── deploy/
+│   ├── docker/
+│   │   └── compose.yml         # Docker Compose 설정
+│   ├── env.template            # 환경변수 템플릿
+│   └── scripts/                # 실행 스크립트 (serve.sh, dev.sh 등)
+├── package.json                # 루트 (scripts, test)
+├── .env                        # 환경변수 (gitignore 대상)
 ├── LICENSE                     # MIT
 └── README.md
 ```
 
-### Root package.json (Workspace 설정)
+### Root package.json (스크립트)
 
 ```json
 {
   "name": "docs-markdown-editor",
-  "private": true,
-  "workspaces": ["packages/*"],
+  "type": "module",
   "scripts": {
-    "dev": "bun run --filter './packages/server' dev & bun run --filter './packages/web' dev",
-    "build": "bun run --filter './packages/*' build",
-    "test": "bun run --filter './packages/*' test",
-    "lint": "biome check .",
-    "typecheck": "tsc --noEmit -p tsconfig.base.json"
+    "dev": "bash ./deploy/scripts/dev.sh",
+    "dev:server": "bash ./deploy/scripts/dev-server.sh",
+    "dev:web": "bash ./deploy/scripts/dev-web.sh",
+    "serve": "bash ./deploy/scripts/serve.sh",
+    "user:create": "bash ./deploy/scripts/create-local-user.sh",
+    "test": "node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
   }
 }
 ```
@@ -240,14 +207,13 @@ docs-markdown-editor/
 ### 패키지 의존성 그래프
 
 ```
-shared ← server ← cli
+shared ← server
 shared ← web
 ```
 
-- `shared`: 타입, 상수, frontmatter 파서 (의존성 없음)
-- `server`: HTTP, WS, 파일 I/O, 검색, MCP
-- `web`: React UI, Tiptap 에디터
-- `cli`: server API 호출 래퍼
+- `shared`: Frontmatter 타입/파서, Markdown 문서 유틸 (의존성 없음)
+- `server`: HTTP 서버, 파일 I/O, 검색, 인증, SSE 실시간 이벤트
+- `web`: React UI, Tiptap 에디터, Zustand 상태관리
 
 ---
 
@@ -274,61 +240,43 @@ workspace/                          # --workspace 옵션으로 지정
 │       └── meeting/
 │           └── whiteboard.jpg
 └── .docs/                          # 서비스 메타데이터 (gitignore 권장)
-    ├── config.yaml                 # 서비스 설정
     ├── auth/                       # 사용자/토큰/세션 메타데이터
-    │   ├── users.db
-    │   └── oidc-providers.yaml
+    │   └── users.db
     ├── audit/                      # 편집 이벤트 로그
     │   └── events.ndjson
     ├── templates/                  # 문서 생성 템플릿
     │   ├── default.md
     │   ├── meeting-note.md
     │   └── tech-spec.md
-    └── search-index/               # FlexSearch 인덱스 캐시
-        └── index.json
+    └── tree-order.json             # 파일 트리 정렬 순서
 ```
 
-### 3.2 config.yaml 스키마
+### 3.2 Runtime Configuration (Current Implementation)
 
-```yaml
-# .docs/config.yaml
-server:
-  port: 3000
-  host: "0.0.0.0"
+현재 구현은 `.docs/config.yaml`을 사용하지 않는다. 런타임 설정은 저장소 루트 `.env`와 `process.env`로 주입하고, 인증 방식/OIDC 설정은 `.docs/auth/users.db` 안의 `app_config` 테이블에 저장한다.
 
-auth:
-  local:
-    enabled: true
-    allow_signup: false
-  session:
-    cookie_name: "docs_session"
-  pat:
-    enabled: true
-  oidc:
-    providers:
-      - name: "authentik"
-        issuer_url: "https://auth.example.com/application/o/docs/"
-        client_id: ""
-        client_secret: ""
-
-editor:
-  auto_save_debounce_ms: 300
-  default_template: "default"
-
-assets:
-  directory: ".assets"            # workspace 기준 상대경로
-
-search:
-  exclude_patterns:               # 검색 제외 패턴
-    - "node_modules/**"
-    - ".git/**"
-    - ".docs/**"
-    - ".assets/**"
-
-frontmatter:
-  preserve_on_content_save: true
-  explicit_edit_only: true
+```env
+# repository root .env
+WORKSPACE_ROOT=/data
+WORKSPACE_ROOT_HOST=/absolute/path/to/workspace
+HOST=0.0.0.0
+PORT=3001
+WEB_PORT=5173
+PUBLIC_HOST=localhost
+WEB_ROOT=/absolute/path/to/packages/web/dist
+TRUST_PROXY=false
 ```
+
+`app_config` 예시 키:
+
+- `auth_method`
+- `oidc_issuer`
+- `oidc_client_id`
+- `oidc_client_secret`
+- `oidc_provider_name`
+- `oidc_authorization_endpoint`
+- `oidc_token_endpoint`
+- `oidc_userinfo_endpoint`
 
 ### 3.3 Frontmatter Schema
 
@@ -399,15 +347,17 @@ interface SearchResult {
   score: number;
 }
 
-/** WebSocket 이벤트 */
+/** SSE 이벤트 */
 type WSEvent =
-  | { type: "file:created"; path: string; meta: DocumentMeta }
-  | { type: "file:updated"; path: string; meta: DocumentMeta }
+  | { type: "tree:changed" }
+  | { type: "file:created"; path: string }
+  | { type: "file:updated"; path: string }
   | { type: "file:deleted"; path: string }
   | { type: "file:moved";   from: string; to: string }
   | { type: "dir:created";  path: string }
   | { type: "dir:deleted";  path: string }
-  | { type: "doc:content";  path: string; content: string }  // 문서 내용 변경
+  | { type: "dir:moved";    from: string; to: string }
+  | { type: "doc:content";  path: string; content: string; frontmatter: Frontmatter; originClientId: string | null }
   | { type: "error";        message: string };
 
 /** API 응답 래퍼 */
@@ -438,53 +388,34 @@ interface AssetUploadResult {
 ### 4.1 서버 엔트리포인트
 
 ```typescript
-// packages/server/src/index.ts (개념)
+// packages/server/src/http/node-server.ts (개념)
 
-async function main() {
-  const config = loadConfig(workspacePath);
+async function startApiServer(options) {
+  // 1. API 앱 생성 (서비스 초기화 포함)
+  const app = createApiApp({ workspaceRoot: options.workspaceRoot });
 
-  // 1. 서비스 초기화
-  const documentService = new DocumentService(workspacePath, config);
-  const searchService = new SearchService(workspacePath, config);
-  const watcherService = new WatcherService(workspacePath, config);
-  const templateService = new TemplateService(workspacePath, config);
-  const assetService = new AssetService(workspacePath, config);
+  // 2. 파일 감시자 초기화
+  const watcher = new WatcherService({
+    workspaceRoot: options.workspaceRoot,
+    documentService: app.documentService,
+    realtimeService: app.realtimeService,
+    searchService: app.searchService,
+  });
+  app.setWatcherService(watcher);
+  watcher.start();  // 500ms 폴링 시작
 
-  // 2. 검색 인덱스 빌드
-  await searchService.buildIndex();
-
-  // 3. Hono 앱 생성
-  const app = createApp({
-    documentService,
-    searchService,
-    templateService,
-    assetService,
-    config,
+  // 3. node:http 서버 생성
+  const server = createServer(async (req, res) => {
+    // 보안 헤더 설정 (CSP, X-Frame-Options 등)
+    // 정적 파일 서빙 시도 (SPA fallback 포함)
+    // API 라우팅: Request/Response 변환 → app.fetch()
   });
 
-  // 4. WebSocket 핸들러
-  const wsHandler = createWSHandler({ documentService, watcherService });
-
-  // 5. 파일 감시 시작 → 변경 시 WS 브로드캐스트 + 인덱스 업데이트
-  watcherService.start({
-    onChange: (event) => {
-      wsHandler.broadcast(event);
-      searchService.handleFileEvent(event);
-    },
-  });
-
-  // 6. Bun.serve()로 HTTP + WebSocket 동시 서빙
-  Bun.serve({
-    port: config.server.port,
-    fetch: app.fetch,           // Hono 핸들러
-    websocket: wsHandler,       // Bun 네이티브 WebSocket
-  });
-
-  // 7. MCP Server 시작 (Phase 1 후반, core API 안정화 후)
-  const mcpServer = createMCPServer({ documentService, searchService, templateService });
-  mcpServer.listen();
+  server.listen(options.port, options.host);
 }
 ```
+
+> **Note:** CLI 패키지(`packages/cli`)와 MCP 서버(`packages/server/src/mcp/`)는 Phase 2 이후 구현 예정이다.
 
 ### 4.2 REST API 상세
 
@@ -633,89 +564,65 @@ class DocumentService {
 
 ```typescript
 class WatcherService {
-  private watcher: chokidar.FSWatcher;
-  private ignoreSet: Set<string>;  // 자체 쓰기 무시용
+  private snapshot: WorkspaceSnapshot;     // { directories: Set, files: Map<path, {modifiedMs, size}> }
+  private recentServerWrites: Map<string, number>;  // 자체 쓰기 무시용
 
-  constructor(private workspace: string, private config: Config) {}
+  constructor(options: {
+    workspaceRoot: string;
+    documentService: DocumentService;
+    realtimeService: RealtimeService;
+    searchService: SearchService;
+    intervalMs?: number;  // 기본 500ms
+  })
 
-  start(handlers: { onChange: (event: WSEvent) => void }): void
+  start(): void        // setInterval 폴링 시작
+  stop(): void         // 폴링 중지
+  refresh(): WorkspaceEvent[]  // 스냅샷 비교 → 이벤트 발행
 
-  /** 자체 쓰기 시 이벤트 무시를 위해 등록 */
-  ignoreNext(filePath: string): void
-
-  stop(): void
+  /** API 저장 후 호출 — watcher echo 방지 (2초 suppression window) */
+  suppressNextChange(filePath: string): void
 }
 ```
 
 핵심 동작:
-- `chokidar.watch(workspace, { ignoreInitial: true, ignored: ['.docs/**', '.assets/**', '.git/**'] })`
-- `add` → `file:created` 이벤트
-- `change` → `file:updated` 이벤트 (300ms debounce)
-- `unlink` → `file:deleted` 이벤트
-- `addDir` / `unlinkDir` → `dir:created` / `dir:deleted`
-- **자체 쓰기 무시**: `DocumentService`가 파일을 쓰기 전 `watcherService.ignoreNext(path)` 호출 → watcher가 해당 이벤트 스킵
+- `setInterval`로 500ms마다 워크스페이스 전체 스냅샷(`readdirSync` + `statSync`) 캡처
+- 이전 스냅샷과 비교하여 `file:created`, `file:updated`, `file:deleted`, `dir:created`, `dir:deleted` 이벤트 생성
+- 변경 감지 시 `searchService.buildIndex()` 호출하여 검색 인덱스 재구축
+- 변경된 파일의 `doc:content` 이벤트를 SSE로 브로드캐스트 (실시간 동기화)
+- **자체 쓰기 무시**: API save 경로에서 `suppressNextChange(path)` 호출 → watcher가 해당 파일의 `doc:content` 브로드캐스트 스킵 (2초 이내)
+- `.docs/`, `.assets/` 등 예약 디렉토리는 감시 제외
 
 #### SearchService
 
 ```typescript
 class SearchService {
-  private index: FlexSearch.Document;
-  private cjkFallbackIndex: Map<string, string[]>;
+  private entries: Map<string, IndexEntry>;  // path → {title, tokens, cjkTokens}
 
-  constructor(private workspace: string, private config: Config) {}
+  constructor(workspaceRoot: string)
 
-  /** 초기 인덱스 빌드: 모든 .md 파일 스캔 */
-  async buildIndex(): Promise<void>
+  /** 전체 인덱스 빌드: 모든 .md 파일 스캔 */
+  buildIndex(): void
 
   /** 검색 수행 */
-  search(query: string, opts?: { path?: string; tags?: string[]; limit?: number }): SearchResult[]
-
-  /** 파일 이벤트에 따른 인덱스 업데이트 */
-  handleFileEvent(event: WSEvent): void
-
-  /** 인덱스 디스크 캐시 저장 */
-  async persistIndex(): Promise<void>
+  search(query: string, limit?: number): SearchResult[]
 }
 ```
 
-FlexSearch 설정:
-```typescript
-const index = new FlexSearch.Document({
-  document: {
-    id: "path",
-    index: ["title", "content", "tags"],
-    store: ["path", "title", "snippet"],
-  },
-  tokenize: "forward",
-  language: "en",
-});
-```
+검색 구현 (외부 라이브러리 없음):
+- **ASCII 토큰화**: 소문자 변환 후 단어 분리 (`/[a-z0-9]+/g`)
+- **CJK 토큰화**: 한글/CJK 문자를 2-gram, 3-gram으로 분할
+- **점수 계산**: 제목 매칭 가중치 + 경로 매칭 가중치 + 본문 스니펫 생성
+- MVP에서는 메모리 내 인덱스, Phase 2에서 전용 검색 엔진 검토 가능
 
-CJK fallback 전략:
-- 검색어 또는 문서 내용에 한글/CJK가 포함되면 2-gram/3-gram 토큰을 별도 인덱스에 저장
-- 검색 시 일반 FlexSearch 결과와 CJK fallback 결과를 합쳐 점수 조정
-- MVP에서는 품질 우선, Phase 2에서 전용 형태소/검색 엔진 검토
+#### Frontmatter 처리
 
-#### FrontmatterService
-
-```typescript
-class FrontmatterService {
-  /** .md 파일 문자열에서 frontmatter 파싱 */
-  parse(raw: string): { frontmatter: Frontmatter; content: string }
-
-  /** frontmatter + content를 .md 문자열로 합치기 */
-  serialize(frontmatter: Frontmatter, content: string): string
-
-  /** frontmatter 병합 (기존 필드 유지, 새 필드 추가/덮어쓰기) */
-  merge(existing: Frontmatter, updates: Partial<Frontmatter>): Frontmatter
-}
-```
-
-YAML 파싱: `yaml` npm 패키지 (표준 YAML 1.2 지원)
+Frontmatter 파싱과 직렬화는 `packages/shared/src/frontmatter.ts`에서 처리한다.
+정규식 기반 YAML frontmatter 파싱을 사용하며, `yaml` 패키지 없이 자체 구현한다.
 
 원칙:
-- 일반 본문 저장에서는 `FrontmatterService.serialize()`를 호출하지 않는다
-- frontmatter 재직렬화는 사용자의 명시적 메타데이터 편집 또는 문서 생성 시에만 허용한다
+- 일반 본문 저장에서는 frontmatter를 재직렬화하지 않는다
+- frontmatter 수정은 사용자의 명시적 메타데이터 편집 또는 문서 생성 시에만 허용한다
+- 원문 frontmatter 블록을 최대한 보존하여 `no-op roundtrip` 원칙을 준수한다
 
 #### AuthService
 
@@ -776,28 +683,26 @@ Asset 디렉토리: .assets/guide/intro/
 마크다운 링크: ![screenshot](/.assets/guide/intro/screenshot.png)
 ```
 
-### 4.5 WebSocket 프로토콜
+### 4.5 SSE Event Stream
+
+현재 구현은 양방향 WebSocket 프로토콜이 아니라 `/api/events` 단일 EventSource 스트림을 사용한다.
 
 ```typescript
-// 클라이언트 → 서버
-type ClientMessage =
-  | { type: "subscribe:tree" }                          // 파일 트리 변경 구독
-  | { type: "subscribe:doc"; path: string }             // 특정 문서 변경 구독
-  | { type: "unsubscribe:doc"; path: string }
-  | { type: "doc:update"; path: string; content: string } // Phase 2: 실시간 편집
+const stream = new EventSource("/api/events", { withCredentials: true });
 
-// 서버 → 클라이언트
-type ServerMessage = WSEvent;  // 위에서 정의한 WSEvent 타입
+stream.onmessage = (event) => {
+  const payload = JSON.parse(event.data) as WSEvent;
+  // tree/document store 업데이트
+};
 ```
 
 연결 흐름:
 ```
-1. Client → WS /ws 연결
-2. Client → { type: "subscribe:tree" }
-3. Server → 파일 변경 시 WSEvent 브로드캐스트
-4. Client → 문서 열기: { type: "subscribe:doc", path: "guide/intro.md" }
-5. Server → 해당 문서 외부 변경 시 { type: "doc:content", path, content }
-6. Client → 문서 닫기: { type: "unsubscribe:doc", path: "guide/intro.md" }
+1. Client → GET /api/events
+2. Server → text/event-stream 연결 유지
+3. Server → 파일/디렉토리 변경 시 WSEvent 브로드캐스트
+4. Client → doc:content 수신 시 현재 문서 상태 갱신
+5. 문서 저장은 별도 REST API (PUT/PATCH /api/docs/:path) 로 수행
 ```
 
 ### 4.6 Security Layer
@@ -1000,7 +905,7 @@ const editor = useEditor({
 no-op (쓰기 생략)                     frontmatter 원문 유지 + 본문만 갱신
                                              │
                                              ▼
-                                  Bun.write()
+                                  writeFileSync()
 [파일시스템 .md]
 ```
 
@@ -1034,7 +939,7 @@ Roundtrip 계약:
     │                              │                            │
     ├─ GET /api/docs/guide/intro.md ─►                          │
     │                              ├─ sanitizePath() ──────────►│
-    │                              ├─ Bun.file().text() ◄──────┤
+    │                              ├─ readFileSync() ◄──────┤
     │                              ├─ FrontmatterService.parse()│
     │                              │                            │
     │     ◄── 200 { data: Document }                            │
@@ -1063,9 +968,9 @@ Roundtrip 계약:
     │                              ├─ raw 비교 (변경 없음?)     │
     │                              │   → 예: write 생략         │
     │                              │   → 아니오: 본문 diff 적용 │
-    │                              ├─ watcherService.ignoreNext()
+    │                              ├─ watcherService.suppressNextChange()
     │                              ├─ frontmatter 원문 유지
-    │                              ├─ Bun.write() ─────────────►│
+    │                              ├─ writeFileSync() ─────────────►│
     │                              │                            │
     │     ◄── 200 { data: Document }                            │
     ├─ saveStatus = "saved"        │                            │
@@ -1080,10 +985,10 @@ AI Agent: 외부에서 "guide/intro.md" 파일 직접 수정
 [File System]               [Server]                    [Web Client]
     │                           │                            │
     ├─ file changed ───────────►│                            │
-    │                  chokidar "change" event               │
+    │                  watcher polling detects change               │
     │                           ├─ ignoreSet 확인 (자체 쓰기?)│
     │                           │   → 아니오, 외부 변경       │
-    │                           ├─ Bun.file().text()         │
+    │                           ├─ readFileSync()         │
     │                           ├─ FrontmatterService.parse()│
     │                           ├─ searchService.handleFileEvent()
     │                           │                            │
@@ -1122,7 +1027,7 @@ AI Agent: 외부에서 "guide/intro.md" 파일 직접 수정
     │                              │   filename → "file.png"    │
     │                              │   (중복 시 file-1.png)     │
     │                              ├─ mkdir -p .assets/guide/intro/
-    │                              ├─ Bun.write() ─────────────►│
+    │                              ├─ writeFileSync() ─────────────►│
     │                              │                            │
     │     ◄── 201 { data: {                                     │
     │       path: "guide/intro/file.png",                       │
@@ -1150,8 +1055,8 @@ AI Agent: 외부에서 "guide/intro.md" 파일 직접 수정
     │                              │   {{title}} → "Standup..." │
     │                              │   {{date}} → "2026-03-07"  │
     │                              ├─ FrontmatterService.merge()│
-    │                              ├─ watcherService.ignoreNext()
-    │                              ├─ Bun.write() ─────────────►│
+    │                              ├─ watcherService.suppressNextChange()
+    │                              ├─ writeFileSync() ─────────────►│
     │                              │                            │
     │     ◄── 201 { data: Document }                            │
     ├─ treeStore.loadTree() (refresh)                           │
@@ -1161,7 +1066,7 @@ AI Agent: 외부에서 "guide/intro.md" 파일 직접 수정
 
 ---
 
-## 7. CLI Design
+## 7. CLI Design (Planned)
 
 ### 7.1 명령어 구조
 
@@ -1251,7 +1156,7 @@ CLI 동작 모드:
 
 ---
 
-## 8. MCP Server Design
+## 8. MCP Server Design (Planned)
 
 MCP는 별도 저장 계층을 만들지 않고 `DocumentService`와 `SearchService` 위에 thin adapter로 얹는다. 구현 시점은 Phase 1 후반으로 잡고, CLI/REST와 동일한 권한 및 경로 검증 규칙을 재사용한다.
 
@@ -1414,19 +1319,7 @@ bun dev
     "dev": "bun run --filter server dev & bun run --filter web dev",
     "build": "bun run --filter '*' build",
     "test": "bun run --filter '*' test",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix .",
-    "typecheck": "bun run --filter '*' typecheck"
-  }
-}
-
-// packages/server/package.json
-{
-  "scripts": {
-    "dev": "bun --watch src/index.ts -- --workspace ./example-docs",
-    "build": "bun build src/index.ts --outdir dist --target bun",
-    "build:binary": "bun build src/index.ts --compile --outfile dist/docs-server",
-    "start": "bun dist/index.js"
+    "test": "node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
   }
 }
 
@@ -1438,91 +1331,57 @@ bun dev
     "preview": "vite preview"
   }
 }
-
-// packages/cli/package.json
-{
-  "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun",
-    "build:binary": "bun build src/index.ts --compile --outfile dist/docs",
-    "dev": "bun src/index.ts"
-  },
-  "bin": {
-    "docs": "./dist/index.js"
-  }
-}
 ```
+
+> **Note:** 서버 패키지는 별도 빌드 스크립트 없이 Node.js v25+의 네이티브 TS 실행으로 직접 구동한다.
 
 ### 9.3 Production Build
 
 ```
 빌드 결과물:
 
-packages/server/dist/index.js       # 서버 번들 (Bun 타겟)
-packages/server/dist/docs-server     # 단일 실행 바이너리 (bun build --compile)
-packages/web/dist/                   # 정적 파일 (HTML, JS, CSS)
-packages/cli/dist/index.js           # CLI 번들
-packages/cli/dist/docs               # CLI 단일 바이너리
+packages/web/dist/                   # Vite 빌드 정적 파일 (HTML, JS, CSS)
 
 배포 모드:
-  서버가 web/dist/ 를 정적 파일로 서빙
+  serve.sh가 web을 빌드한 뒤 node-server.ts 실행
+  서버가 web/dist/ 를 정적 파일로 서빙 (WEB_ROOT 환경변수)
   → 단일 프로세스로 API + 웹 UI 모두 제공
+  → SPA fallback: 파일이 아닌 경로는 index.html로 응답
 
-단일 바이너리 배포 (bun build --compile):
-  → Bun 런타임 내장, 별도 설치 불필요
-  → ./docs-server --workspace /path/to/docs 로 즉시 실행
-  → ~50-80MB (Bun runtime 포함)
+서버 코드는 번들링 없이 Node.js가 TypeScript를 직접 실행
 ```
 
 ### 9.4 Docker
 
-```dockerfile
-# Dockerfile
-FROM oven/bun:1-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN bun install --frozen-lockfile
-RUN bun run build
-
-FROM oven/bun:1-alpine
-WORKDIR /app
-COPY --from=builder /app/packages/server/dist ./server/
-COPY --from=builder /app/packages/web/dist ./web/
-
-ENV WORKSPACE=/data
-VOLUME /data
-EXPOSE 3000
-
-CMD ["bun", "server/index.js", "--workspace", "/data"]
-```
-
-> **Alternative: 단일 바이너리 Docker** — `bun build --compile`로 빌드하면 Bun 런타임 없는 `distroless` 이미지도 사용 가능하여 이미지 크기를 더 줄일 수 있음.
-
 ```yaml
-# docker-compose.yml
+# deploy/docker/compose.yml
 services:
-  docs-editor:
-    build: .
+  docs-markdown-editor:
+    container_name: docs-markdown-editor
+    image: ${IMAGE_NAME:-docs-markdown-editor:local}
     ports:
-      - "3000:3000"
-    volumes:
-      - ./my-docs:/data
+      - "${PORT:-3001}:${PORT:-3001}"
     environment:
-      - PORT=3000
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-3001}
+      WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/data}
+      WEB_ROOT: /app/packages/web/dist
+    volumes:
+      - ${WORKSPACE_ROOT_HOST}:${WORKSPACE_ROOT:-/data}
+    restart: unless-stopped
 ```
 
-### 9.5 원라인 실행
+### 9.5 실행 방법
 
 ```bash
-# bunx로 실행 (npx 호환)
-bunx docs-markdown-editor init ./my-docs
-bunx docs-markdown-editor serve ./my-docs
+# 프로덕션 단일 포트 실행 (빌드 포함)
+npm run serve
 
-# npx도 지원 (Node.js 환경 사용자용)
-npx docs-markdown-editor init ./my-docs
-npx docs-markdown-editor serve ./my-docs
+# 개발 모드 (API 서버 + Vite 분리 실행)
+npm run dev
 
-# 또는 줄여서
-bunx docs-md init && bunx docs-md serve
+# Docker 배포
+docker compose -f deploy/docker/compose.yml up -d --build
 ```
 
 ### 9.6 Week 1 Implementation Spec
@@ -1643,7 +1502,7 @@ auth:
 #### D. Korean/CJK Search Model
 
 문서 인덱싱 시:
-- ASCII/영문 위주 텍스트는 FlexSearch 기본 인덱스
+- ASCII/영문 위주 텍스트는 단어 토큰 기반 인덱스
 - 한글/CJK 포함 텍스트는 normalized text에서 n-gram 토큰 생성
 - normalization은 `NFC + lowercasing + 연속 공백 축소`
 
@@ -1673,7 +1532,7 @@ MVP 품질 목표:
 4. SQLite auth schema + Argon2id local login 구현
 5. PAT 발급/검증 구현
 6. Authentik-compatible OIDC flow PoC
-7. FlexSearch + CJK fallback indexing 구현
+7. 커스텀 검색 인덱싱 구현 (ASCII 토큰 + CJK n-gram)
 8. end-to-end golden tests + auth smoke tests
 
 ### 9.7 npm 패키지 배포 구조
@@ -1742,22 +1601,16 @@ npm packages:
 
 | Package | Version | Note |
 |---------|---------|------|
-| bun | 1.2+ | 런타임, 패키지 매니저, 번들러, 테스트러너 통합 |
-| typescript | 5.5+ | Bun 네이티브 TS 실행 (별도 컴파일 불필요) |
-| hono | 4.x | Bun 1st-class 지원 |
-| chokidar | 5.x | ESM only, 파일 감시 |
-| @tiptap/core | 3.x | |
-| @tiptap/markdown | 3.x | MarkedJS 기반 |
-| @tiptap/react | 3.x | |
-| yjs | 13.x | Phase 2 |
+| node | 25+ | 런타임, 네이티브 TS 실행, 내장 테스트 러너 |
+| typescript | 5.7+ | Node.js v25+ 네이티브 실행 |
+| @tiptap/core | 2.11+ | ProseMirror 기반 에디터 |
+| @tiptap/react | 2.11+ | React 바인딩 |
+| node:sqlite | - | 인증 DB (SQLite) |
+| yjs | 13.x | Phase 2 (동시편집) |
 | react | 19.x | |
-| vite | 6.x | 프론트엔드 HMR (Bun과 호환) |
+| vite | 6.x | 프론트엔드 HMR 및 프로덕션 빌드 |
 | tailwindcss | 4.x | |
-| flexsearch | 0.7.x | |
-| commander | 12.x | |
-| @modelcontextprotocol/sdk | latest | |
-| zustand | 5.x | |
-| yaml | 2.x | YAML 파싱 |
-| biome | 1.x | |
+| zustand | 5.x | 상태 관리 |
+| lowlight | 3.x | 코드 블록 구문 강조 |
 
-> **Note:** Bun은 `bun:test` 내장 테스트러너를 제공하므로 vitest가 불필요. WebSocket도 `Bun.serve()`에 내장되어 `ws` 패키지 불필요. `tsx`, `tsup` 등의 빌드 도구도 `bun build`로 대체.
+> **Note:** 서버는 프레임워크 없이 `node:http`를 직접 사용한다. 검색은 외부 라이브러리 없이 자체 구현(ASCII 토큰 + CJK n-gram)한다. 파일 감시는 chokidar 대신 커스텀 폴링 방식을 사용한다. CLI와 MCP 서버는 아직 구현되지 않았고 후속 범위다.
