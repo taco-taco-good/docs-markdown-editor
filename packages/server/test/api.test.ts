@@ -56,6 +56,8 @@ test("API enforces auth and serves health without auth", async () => {
 });
 
 test("API throttles repeated login failures and sets Secure cookies on HTTPS", async () => {
+  const savedTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = "true";
   const workspace = createWorkspace();
   const app = createApiApp({ workspaceRoot: workspace });
   app.authService.createLocalUser("alice", "correct horse battery staple", "Alice");
@@ -104,6 +106,10 @@ test("API throttles repeated login failures and sets Secure cookies on HTTPS", a
   );
   assert.equal(secureLogin.status, 200);
   assert.match(secureLogin.headers.get("set-cookie") ?? "", /Secure/);
+
+  // Restore original env
+  if (savedTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = savedTrustProxy;
 });
 
 test("API supports login, document CRUD, tree, search, and PAT auth", async () => {
@@ -685,3 +691,88 @@ test("tree keeps custom sibling order and root moves after drag-style reposition
     ["folder", "alpha.md", "gamma.md", "beta.md", "inside.md"],
   );
 });
+
+test("TRUST_PROXY disabled ignores X-Forwarded-For for client key extraction", async () => {
+  const savedTrustProxy = process.env.TRUST_PROXY;
+  delete process.env.TRUST_PROXY;
+
+  const workspace = createWorkspace();
+  const app = createApiApp({ workspaceRoot: workspace });
+  app.authService.createLocalUser("alice", "correct horse battery staple", "Alice");
+
+  // Make three failures with a forwarded IP — they should all be treated
+  // as the same key ("unknown") since TRUST_PROXY is off
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const failure = await app.fetch(
+      createRequest("/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "1.2.3.4",
+        },
+        body: JSON.stringify({
+          username: "alice",
+          password: "wrong-password",
+        }),
+      }),
+    );
+    assert.equal(failure.status, 401);
+  }
+
+  // The fourth failure; without TRUST_PROXY the forwarded IP is ignored
+  // so the throttle key is always "unknown:alice" — throttling still works
+  const throttled = await app.fetch(
+    createRequest("/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": "1.2.3.4",
+      },
+      body: JSON.stringify({
+        username: "alice",
+        password: "wrong-password",
+      }),
+    }),
+  );
+  assert.equal(throttled.status, 429);
+
+  // Restore
+  if (savedTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = savedTrustProxy;
+});
+
+test("path traversal attempts return 403", async () => {
+  const workspace = createWorkspace();
+  const app = createApiApp({ workspaceRoot: workspace });
+  app.authService.createLocalUser("alice", "correct horse battery staple", "Alice");
+
+  const loginResponse = await app.fetch(
+    createRequest("/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: "alice",
+        password: "correct horse battery staple",
+      }),
+    }),
+  );
+  const loginPayload = await loginResponse.json();
+  const sessionId = loginPayload.data.sessionId as string;
+
+  const traversalPaths = [
+    "/api/docs/..%2F..%2Fetc%2Fpasswd",
+    "/api/docs/..%2Fsecret.md",
+  ];
+
+  for (const traversalPath of traversalPaths) {
+    const response = await app.fetch(
+      createRequest(traversalPath, {
+        headers: { "x-session-id": sessionId },
+      }),
+    );
+    assert.equal(response.status, 403, `Expected 403 for ${traversalPath}`);
+    const body = await response.json();
+    assert.equal(body.error.code, "PATH_TRAVERSAL");
+  }
+});
+
