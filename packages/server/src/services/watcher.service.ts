@@ -25,6 +25,15 @@ export class WatcherService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private snapshot: WorkspaceSnapshot;
 
+  /**
+   * Files recently written by the server (via API save).
+   * The watcher should skip broadcasting doc:content for these
+   * to avoid a feedback loop where the saving client receives
+   * its own change back with originClientId: null.
+   */
+  private recentServerWrites = new Map<string, number>();
+  private static readonly SUPPRESS_WINDOW_MS = 2000;
+
   constructor(options: {
     workspaceRoot: string;
     documentService: DocumentService;
@@ -38,6 +47,11 @@ export class WatcherService {
     this.searchService = options.searchService;
     this.intervalMs = options.intervalMs ?? 500;
     this.snapshot = this.captureSnapshot();
+  }
+
+  /** Mark a file as recently written by the server (call after API save). */
+  suppressNextChange(filePath: string): void {
+    this.recentServerWrites.set(filePath, Date.now());
   }
 
   start(): void {
@@ -90,15 +104,32 @@ export class WatcherService {
 
     this.searchService.buildIndex();
 
+    // Purge expired suppression entries.
+    const now = Date.now();
+    for (const [suppressedPath, timestamp] of this.recentServerWrites) {
+      if (now - timestamp > WatcherService.SUPPRESS_WINDOW_MS) {
+        this.recentServerWrites.delete(suppressedPath);
+      }
+    }
+
     for (const event of events) {
       this.realtimeService.publish(event);
       if (event.type === "file:created" || event.type === "file:updated") {
+        // Skip doc:content broadcast for files the server just wrote.
+        // The save route already published a proper event with originClientId.
+        if (this.recentServerWrites.has(event.path)) {
+          this.recentServerWrites.delete(event.path);
+          continue;
+        }
+
         try {
           const document = this.documentService.read(event.path);
           this.realtimeService.publish({
             type: "doc:content",
             path: event.path,
             content: document.content,
+            frontmatter: document.frontmatter,
+            originClientId: null,
           });
         } catch {
           // Ignore files that disappear mid-refresh.

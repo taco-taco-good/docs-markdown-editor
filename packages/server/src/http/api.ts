@@ -129,5 +129,9 @@ export function createApiApp(options: ApiServices) {
     fetch,
     realtimeService,
     searchService,
+    /** Inject the watcher so save routes can suppress echo events. */
+    setWatcherService(watcher: { suppressNextChange(filePath: string): void }) {
+      ctx.watcherService = watcher;
+    },
   };
 }

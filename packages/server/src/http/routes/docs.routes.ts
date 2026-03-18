@@ -2,6 +2,8 @@ import type { FrontmatterValue } from "../../../../shared/src/frontmatter.ts";
 import {
   type ApiContext,
   type RequestActor,
+  errorResponse,
+  getEditorClientIdFromRequest,
   jsonResponse,
   readJson,
   decodeRoutePath,
@@ -53,6 +55,20 @@ export async function handleDocsRoutes(
       throw new Error("NOT_FOUND");
     }
 
+    if (existed && request.method === "PATCH") {
+      const baseRevision = request.headers.get("x-base-revision")?.trim();
+      if (baseRevision) {
+        const currentDocument = ctx.documentService.read(docsPath);
+        if (currentDocument.revision !== baseRevision) {
+          return errorResponse(409, "VERSION_MISMATCH", "Document has changed on the server", {
+            document: toApiDocument(currentDocument, ctx.documentService),
+            actualRevision: currentDocument.revision,
+            expectedRevision: baseRevision,
+          });
+        }
+      }
+    }
+
     let document = existed
       ? ctx.documentService.read(docsPath)
       : ctx.documentService.create(docsPath, {
@@ -81,7 +97,12 @@ export async function handleDocsRoutes(
 
     if (!existed || document.changed) {
       ctx.searchService.buildIndex();
-      publishDocumentSnapshot(ctx, docsPath, existed ? "file:updated" : "file:created");
+      publishDocumentSnapshot(
+        ctx,
+        docsPath,
+        existed ? "file:updated" : "file:created",
+        getEditorClientIdFromRequest(request),
+      );
       ctx.realtimeService.publish({ type: "tree:changed" });
     }
     const status = existed ? 200 : 201;

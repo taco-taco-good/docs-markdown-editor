@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { FrontmatterValue } from "../../../shared/src/frontmatter.ts";
+
 export type WorkspaceEvent =
   | { type: "tree:changed" }
   | { type: "file:created"; path: string }
@@ -9,7 +11,13 @@ export type WorkspaceEvent =
   | { type: "dir:moved"; from: string; to: string }
   | { type: "dir:created"; path: string }
   | { type: "dir:deleted"; path: string }
-  | { type: "doc:content"; path: string; content: string }
+  | {
+      type: "doc:content";
+      path: string;
+      content: string;
+      frontmatter: Record<string, FrontmatterValue>;
+      originClientId: string | null;
+    }
   | { type: "error"; message: string };
 
 interface Subscriber {

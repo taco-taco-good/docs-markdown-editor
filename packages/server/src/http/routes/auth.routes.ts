@@ -12,9 +12,14 @@ import {
   authenticateRequest,
 } from "../api-helpers.ts";
 
+function getSafeOrigin(request: Request): string {
+  const proto = requestIsSecure(request) ? "https" : "http";
+  const host = request.headers.get("host") ?? "127.0.0.1";
+  return `${proto}://${host}`;
+}
+
 function getRedirectUri(request: Request): string {
-  const url = new URL(request.url);
-  return `${url.origin}/auth/oidc/callback`;
+  return `${getSafeOrigin(request)}/auth/oidc/callback`;
 }
 
 export async function handleAuthRoutes(
@@ -128,16 +133,17 @@ export async function handleAuthRoutes(
   // ── OIDC: Callback ──
   if (request.method === "GET" && pathname === "/auth/oidc/callback") {
     const url = new URL(request.url);
+    const origin = getSafeOrigin(request);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const errorParam = url.searchParams.get("error");
 
     if (errorParam) {
-      return Response.redirect(`${url.origin}/?auth_error=${encodeURIComponent(errorParam)}`, 302);
+      return Response.redirect(`${origin}/?auth_error=${encodeURIComponent(errorParam)}`, 302);
     }
 
     if (!code || !state) {
-      return Response.redirect(`${url.origin}/?auth_error=missing_params`, 302);
+      return Response.redirect(`${origin}/?auth_error=missing_params`, 302);
     }
 
     try {
@@ -147,12 +153,12 @@ export async function handleAuthRoutes(
       return new Response(null, {
         status: 302,
         headers: {
-          location: `${url.origin}/`,
+          location: `${origin}/`,
           "set-cookie": buildSessionCookie(session.sessionId, secure),
         },
       });
     } catch {
-      return Response.redirect(`${url.origin}/?auth_error=callback_failed`, 302);
+      return Response.redirect(`${origin}/?auth_error=callback_failed`, 302);
     }
   }
 

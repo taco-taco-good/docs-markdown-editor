@@ -9,8 +9,9 @@ function fileNameFromPath(path: string): string {
 }
 
 export function EditorToolbar() {
-  const currentDoc = useDocumentStore((s) => s.currentDoc);
   const currentPath = useDocumentStore((s) => s.currentPath);
+  const hasCurrentDoc = useDocumentStore((s) => s.currentDoc !== null);
+  const currentDocPath = useDocumentStore((s) => s.currentDoc?.meta.path ?? "");
   const renameNode = useTreeStore((s) => s.renameNode);
   const deleteNode = useTreeStore((s) => s.deleteNode);
   const showToast = useUIStore((s) => s.showToast);
@@ -18,14 +19,14 @@ export function EditorToolbar() {
   const toggleOutline = useUIStore((s) => s.toggleOutline);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
-  const fileName = useMemo(() => (currentDoc ? fileNameFromPath(currentDoc.meta.path) : ""), [currentDoc]);
+  const fileName = useMemo(() => (currentDocPath ? fileNameFromPath(currentDocPath) : ""), [currentDocPath]);
 
   useEffect(() => {
     setDraftName(fileName);
     setEditingName(false);
   }, [fileName]);
 
-  if (!currentDoc) return null;
+  if (!hasCurrentDoc) return null;
 
   const commitRename = async () => {
     if (!currentPath) return;
@@ -93,7 +94,7 @@ export function EditorToolbar() {
       {/* Outline toggle */}
       <button
         type="button"
-        className="hidden md:flex w-7 h-7 items-center justify-center rounded-md transition-colors"
+        className="flex w-7 h-7 items-center justify-center rounded-md transition-colors"
         style={{
           color: outlineOpen ? "var(--color-accent)" : "var(--color-text-muted)",
           background: outlineOpen ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",

@@ -260,8 +260,34 @@ body {
 }
 
 .docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"] {
-  accent-color: var(--color-accent);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1em;
+  height: 1em;
   margin-top: 0.35em;
+  border: 1.5px solid var(--color-surface-5);
+  border-radius: 3px;
+  background: var(--color-surface-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"]:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.docs-editor .tiptap ul[data-type="taskList"] li label input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 7px;
+  border: solid var(--color-surface-0);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 
 .docs-editor .tiptap table {
@@ -315,14 +341,11 @@ body {
 /* ─── Editor Shell Layout ─── */
 
 .docs-editor-shell {
-  display: flex;
-  align-items: stretch;
   min-height: 100%;
 }
 
 .docs-editor-main {
   min-width: 0;
-  flex: 1 1 auto;
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -334,7 +357,7 @@ body {
 
 /* ─── Outline Panel ─── */
 
-.docs-editor-outline-panel {
+.docs-editor-outline-dock {
   flex: 0 0 0px;
   width: 0;
   min-width: 0;
@@ -344,10 +367,16 @@ body {
   overflow: hidden;
 }
 
-.docs-editor-outline-panel[data-open="true"] {
+.docs-editor-outline-dock[data-open="true"] {
   flex-basis: clamp(13rem, 16vw, 15rem);
   width: clamp(13rem, 16vw, 15rem);
   min-width: clamp(13rem, 16vw, 15rem);
+}
+
+.docs-editor-outline-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .docs-editor-outline__inner {
@@ -590,12 +619,6 @@ body {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 60%, transparent),
     inset 3px 0 0 var(--color-accent);
-}
-
-[role="treeitem"] > [data-tree-node="true"][data-drop-mode="before"],
-[role="treeitem"] > [data-tree-node="true"][data-drop-mode="after"] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* ─── Selection Toolbar ─── */
@@ -919,8 +942,25 @@ body {
     display: none;
   }
 
-  .docs-editor-outline-panel {
-    display: none;
+  .docs-editor-outline-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    width: 0;
+    min-width: 0;
+    flex: none;
+    border-left: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    background: var(--color-surface-1);
+    transition: width 0.25s var(--ease-out-expo), min-width 0.25s var(--ease-out-expo);
+    overflow: hidden;
+  }
+
+  .docs-editor-outline-dock[data-open="true"] {
+    width: min(16rem, 75vw);
+    min-width: min(16rem, 75vw);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
   }
 
   .slash-menu {

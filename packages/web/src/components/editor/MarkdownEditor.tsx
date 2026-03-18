@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import { api } from "../../api/client";
 import { useDocumentStore } from "../../stores/document.store";
 import { useUIStore } from "../../stores/ui.store";
-import { parseMarkdownToDoc, serializeDocToMarkdown } from "../../lib/tiptap-markdown";
+import { parseMarkdownToDoc, serializeDocToMarkdown, looksLikeMarkdown } from "../../lib/tiptap-markdown";
 import { createEditorExtensions } from "./extensions";
 import { replaceEditorContentPreservingSelection, promptForLink } from "./editor-utils";
 import {
@@ -108,12 +109,34 @@ function syncTableTools(
   });
 }
 
+function scrollHeadingToTop(editor: TiptapEditor, target: HTMLElement) {
+  const scrollContainer = editor.view.dom.closest('[data-editor-scroll-container="true"]');
+  if (!(scrollContainer instanceof HTMLElement)) {
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const nextTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top) - 8;
+  scrollContainer.scrollTo({
+    top: Math.max(nextTop, 0),
+    behavior: "smooth",
+  });
+}
+
 // ── Component ──
 
-export function MarkdownEditor() {
-  const currentDoc = useDocumentStore((s) => s.currentDoc);
+interface MarkdownEditorProps {
+  outlinePortalHost?: HTMLElement | null;
+}
+
+export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps) {
   const updateContent = useDocumentStore((s) => s.updateContent);
   const currentPath = useDocumentStore((s) => s.currentPath);
+  const editorSyncVersion = useDocumentStore((s) => s.editorSyncVersion);
+  const beginComposition = useDocumentStore((s) => s.beginComposition);
+  const endComposition = useDocumentStore((s) => s.endComposition);
   const showToast = useUIStore((s) => s.showToast);
   const outlineOpen = useUIStore((s) => s.outlineOpen);
 
@@ -129,6 +152,9 @@ export function MarkdownEditor() {
   const selectedSlashIndexRef = useRef(0);
   const outlineSignatureRef = useRef("");
   const activeOutlineRef = useRef<string | null>(null);
+  const composingRef = useRef(false);
+  const uiSyncFrameRef = useRef<number | null>(null);
+  const outlineSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const commands = slashCommands();
   const visibleCommands = slashState ? filterSlashCommands(commands, slashState.query) : [];
@@ -138,6 +164,7 @@ export function MarkdownEditor() {
 
   const doSyncOutline = (editorInstance: TiptapEditor) => {
     const items = collectOutlineItems(editorInstance);
+    const currentDoc = useDocumentStore.getState().currentDoc;
     const nextItems = items.length > 0
       ? items
       : currentDoc
@@ -169,6 +196,13 @@ export function MarkdownEditor() {
     syncTableTools(e, setTableToolsPosition);
   };
 
+  const syncTransientUi = (editorInstance: TiptapEditor) => {
+    doSyncSlash(editorInstance);
+    doSyncOutlineSelection(editorInstance);
+    syncSelectionToolbar(editorInstance, setSelectionToolbarPosition);
+    syncTableTools(editorInstance, setTableToolsPosition);
+  };
+
   const runSlashCommand = (command: SlashCommand) => {
     if (!editor || !slashStateRef.current) return;
     const range = slashStateRef.current;
@@ -180,17 +214,93 @@ export function MarkdownEditor() {
     setSelectedSlashIndex(0);
   };
 
+  const scheduleUiSync = (editorInstance: TiptapEditor) => {
+    if (uiSyncFrameRef.current !== null) {
+      cancelAnimationFrame(uiSyncFrameRef.current);
+    }
+    uiSyncFrameRef.current = requestAnimationFrame(() => {
+      uiSyncFrameRef.current = null;
+      startTransition(() => {
+        syncTransientUi(editorInstance);
+      });
+    });
+  };
+
+  const scheduleOutlineSync = (editorInstance: TiptapEditor, delayMs = 160) => {
+    if (outlineSyncTimeoutRef.current) {
+      clearTimeout(outlineSyncTimeoutRef.current);
+    }
+    outlineSyncTimeoutRef.current = setTimeout(() => {
+      outlineSyncTimeoutRef.current = null;
+      startTransition(() => {
+        doSyncOutline(editorInstance);
+      });
+    }, delayMs);
+  };
+
+  const flushEditorState = (editorInstance: TiptapEditor) => {
+    updateContent(serializeDocToMarkdown(editorInstance.schema, editorInstance.state.doc));
+    scheduleUiSync(editorInstance);
+    scheduleOutlineSync(editorInstance);
+  };
+
   const editor = useEditor({
     extensions: createEditorExtensions(),
     content: "",
     onCreate: ({ editor }) => syncAll(editor),
     onUpdate: ({ editor }) => {
-      updateContent(serializeDocToMarkdown(editor.schema, editor.state.doc));
-      syncAll(editor);
+      if (composingRef.current || editor.view.composing) {
+        return;
+      }
+      flushEditorState(editor);
     },
-    onSelectionUpdate: ({ editor }) => syncAll(editor),
+    onSelectionUpdate: ({ editor }) => {
+      if (composingRef.current || editor.view.composing) {
+        return;
+      }
+      scheduleUiSync(editor);
+    },
     editorProps: {
       attributes: { class: "docs-editor-content" },
+      // Export markdown when copying as plain text (Ctrl+C)
+      clipboardTextSerializer: (slice, view) => {
+        const schema = view.state.schema;
+        const wrapper = schema.topNodeType.create(null, slice.content);
+        return serializeDocToMarkdown(schema, wrapper);
+      },
+      // Parse markdown from plain-text paste
+      handlePaste: (view, event) => {
+        // If the clipboard has HTML (e.g. from a rich editor), let TipTap handle it
+        const html = event.clipboardData?.getData("text/html");
+        if (html) return false;
+
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text || !looksLikeMarkdown(text)) return false;
+
+        event.preventDefault();
+        const doc = parseMarkdownToDoc(view.state.schema, text);
+        const { from, to } = view.state.selection;
+        const slice = doc.slice(0, doc.content.size);
+        view.dispatch(view.state.tr.replaceRange(from, to, slice));
+        return true;
+      },
+      handleDOMEvents: {
+        compositionstart: () => {
+          composingRef.current = true;
+          beginComposition();
+          return false;
+        },
+        compositionend: () => {
+          queueMicrotask(() => {
+            composingRef.current = false;
+            if (editor) {
+              flushEditorState(editor);
+            }
+            endComposition();
+          });
+          return false;
+        },
+      },
       handleDrop: (_view, event) => {
         const files = event.dataTransfer?.files;
         if (files?.length && currentPath) {
@@ -216,6 +326,12 @@ export function MarkdownEditor() {
           const textBefore = $from.parent.textBetween(0, $from.parentOffset, "\0", "\0");
           const taskMatch = /^-\[( |x|X)?\]$/.exec(textBefore);
           if (taskMatch && $from.parent.type.name !== "codeBlock") {
+            // Only convert when cursor is at the END of the pattern (right after ']').
+            // If there is text after the cursor, the user is editing mid-line — don't convert.
+            const textAfter = $from.parent.textBetween($from.parentOffset, $from.parent.content.size, "\0", "\0");
+            if (textAfter.length > 0) {
+              return false;
+            }
             event.preventDefault();
             const checked = taskMatch[1]?.toLowerCase() === "x";
             editor
@@ -282,19 +398,33 @@ export function MarkdownEditor() {
 
   // Sync editor content when doc changes externally
   useEffect(() => {
-    if (editor && currentDoc) {
+    const latestDoc = useDocumentStore.getState().currentDoc;
+    if (editor && latestDoc) {
       try {
-        const nextDoc = parseMarkdownToDoc(editor.schema, currentDoc.content);
-        const currentSerialized = serializeDocToMarkdown(editor.schema, editor.state.doc);
-        if (currentSerialized !== currentDoc.content) {
-          replaceEditorContentPreservingSelection(editor, nextDoc.toJSON() as Record<string, unknown>);
+        const currentMarkdown = serializeDocToMarkdown(editor.schema, editor.state.doc);
+        if (currentMarkdown === latestDoc.content) {
+          syncAll(editor);
+          return;
         }
+        const nextDoc = parseMarkdownToDoc(editor.schema, latestDoc.content);
+        replaceEditorContentPreservingSelection(editor, nextDoc.toJSON() as Record<string, unknown>);
         syncAll(editor);
       } catch {
         showToast("지원되지 않는 구문이 있어 원문 편집기로 전환해야 합니다.", "error");
       }
     }
-  }, [editor, currentDoc?.content, currentPath, showToast]);
+  }, [editor, editorSyncVersion, showToast]);
+
+  useEffect(() => {
+    return () => {
+      if (uiSyncFrameRef.current !== null) {
+        cancelAnimationFrame(uiSyncFrameRef.current);
+      }
+      if (outlineSyncTimeoutRef.current) {
+        clearTimeout(outlineSyncTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Scroll-based outline tracking
   useEffect(() => {
@@ -385,19 +515,25 @@ export function MarkdownEditor() {
   const desktopSelectionActions = formatActions.filter((a) => ["bold", "italic", "code", "link", "bullet", "task"].includes(a.id));
 
   const focusOutlineItem = (item: OutlineItem) => {
+    const target = editor.view.dom.querySelector<HTMLElement>(`[data-outline-id="${item.id}"]`)
+      ?? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2, h3, h4"))
+        .find((node) => node.textContent?.trim() === item.label);
+
     if (item.pos !== null) {
       const selection = TextSelection.create(editor.state.doc, item.pos);
       editor.view.dispatch(editor.state.tr.setSelection(selection).scrollIntoView());
       editor.commands.focus(item.pos);
       doSyncOutline(editor);
+      if (target instanceof HTMLElement) {
+        requestAnimationFrame(() => {
+          scrollHeadingToTop(editor, target);
+        });
+      }
       return;
     }
 
-    const target = editor.view.dom.querySelector<HTMLElement>(`[data-outline-id="${item.id}"]`)
-      ?? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2, h3, h4"))
-        .find((node) => node.textContent?.trim() === item.label);
     if (target instanceof HTMLElement) {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      scrollHeadingToTop(editor, target);
       target.focus?.();
     }
   };
@@ -415,13 +551,19 @@ export function MarkdownEditor() {
         >
           <EditorContent editor={editor} />
         </div>
-        <OutlinePanel
-          items={outlineItems}
-          activeId={activeOutline}
-          isOpen={outlineOpen}
-          onItemClick={focusOutlineItem}
-        />
       </div>
+
+      {outlinePortalHost
+        ? createPortal(
+            <OutlinePanel
+              items={outlineItems}
+              activeId={activeOutline}
+              isOpen={outlineOpen}
+              onItemClick={focusOutlineItem}
+            />,
+            outlinePortalHost,
+          )
+        : null}
 
       {tableToolsPosition ? (
         <TableToolbar editor={editor} position={tableToolsPosition} />

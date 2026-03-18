@@ -27,8 +27,22 @@ export interface ApiServer {
   url: string;
 }
 
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+
+function getRequestOrigin(req: IncomingMessage): string {
+  let forwardedProto: string | undefined;
+  let forwardedHost: string | undefined;
+  if (TRUST_PROXY) {
+    forwardedProto = req.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim();
+    forwardedHost = req.headers["x-forwarded-host"]?.toString().split(",")[0]?.trim();
+  }
+  const host = forwardedHost || req.headers.host || "127.0.0.1";
+  const proto = forwardedProto || "http";
+  return `${proto}://${host}`;
+}
+
 async function toRequest(req: IncomingMessage): Promise<Request> {
-  const origin = `http://${req.headers.host ?? "127.0.0.1"}`;
+  const origin = getRequestOrigin(req);
   const url = new URL(req.url ?? "/", origin);
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : Readable.toWeb(req);
 
@@ -56,6 +70,12 @@ async function writeResponse(response: Response, res: ServerResponse): Promise<v
   await once(res, "finish");
 }
 
+function isInsideRoot(filePath: string, root: string): boolean {
+  const resolved = path.resolve(filePath);
+  const resolvedRoot = path.resolve(root);
+  return resolved === resolvedRoot || resolved.startsWith(`${resolvedRoot}${path.sep}`);
+}
+
 function tryServeStatic(pathname: string, webRoot: string | undefined, res: ServerResponse): boolean {
   if (!webRoot) return false;
 
@@ -66,6 +86,7 @@ function tryServeStatic(pathname: string, webRoot: string | undefined, res: Serv
 
   // Try exact file match
   let filePath = path.join(webRoot, pathname);
+  if (!isInsideRoot(filePath, webRoot)) return false;
   if (existsSync(filePath) && statSync(filePath).isFile()) {
     const ext = path.extname(filePath);
     const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
@@ -101,10 +122,21 @@ export async function startApiServer(options: {
     realtimeService: app.realtimeService,
     searchService: app.searchService,
   });
+  app.setWatcherService(watcher);
   watcher.start();
   const server = createServer(async (req, res) => {
+    // Security headers applied to every response
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("x-frame-options", "DENY");
+    res.setHeader("referrer-policy", "strict-origin-when-cross-origin");
+    res.setHeader("x-permitted-cross-domain-policies", "none");
+    res.setHeader(
+      "content-security-policy",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
+    );
+
     try {
-      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
+      const url = new URL(req.url ?? "/", getRequestOrigin(req));
 
       // Try static file serving first (for non-API routes)
       if (req.method === "GET" && tryServeStatic(url.pathname, options.webRoot, res)) {
