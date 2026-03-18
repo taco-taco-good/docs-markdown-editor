@@ -10,7 +10,10 @@ import type { Mark, Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 const parserCache = new WeakMap<Schema, MarkdownParser>();
 const serializerCache = new WeakMap<Schema, MarkdownSerializer>();
 type MarkdownStateWithAutolink = MarkdownSerializerState & { inAutolink?: boolean };
-const EMPTY_PARAGRAPH_SENTINEL = "\u00a0";
+// Sentinel removed — empty paragraphs now serialize as truly blank lines.
+// The \u00a0 sentinel previously caused non-breaking spaces to leak into
+// markdown files, corrupting other editors.  An empty string + closeBlock
+// produces the blank line naturally via prosemirror-markdown's flushClose.
 
 function findListItemClose(tokens: Array<{ type: string }>, startIndex: number): number {
   let depth = 1;
@@ -193,7 +196,8 @@ function normalizeParsedNode(schema: Schema, node: ProseMirrorNode): ProseMirror
     content.push(normalizeParsedNode(schema, node.child(index)));
   }
 
-  if (node.type.name === "paragraph" && node.textContent === EMPTY_PARAGRAPH_SENTINEL) {
+  // Strip any legacy \u00a0 sentinel that may still exist in older files
+  if (node.type.name === "paragraph" && node.textContent === "\u00a0") {
     return schema.nodes.paragraph.create(node.attrs);
   }
 
@@ -296,12 +300,9 @@ function createSerializer(schema: Schema): MarkdownSerializer {
         });
       },
       paragraph(state, node) {
-        if (node.childCount === 0) {
-          state.write(EMPTY_PARAGRAPH_SENTINEL);
-          state.closeBlock(node);
-          return;
+        if (node.childCount > 0) {
+          state.renderInline(node);
         }
-        state.renderInline(node);
         state.closeBlock(node);
       },
       table(state, node) {
@@ -366,11 +367,21 @@ function createSerializer(schema: Schema): MarkdownSerializer {
       },
       strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
     },
-    { strict: true },
+    { strict: true, tightLists: true } as { strict: boolean },
   );
 
   serializerCache.set(schema, serializer);
   return serializer;
+}
+
+const MARKDOWN_PATTERNS = /(?:^|\n)(?:#{1,6}\s|[-*+]\s|\d+\.\s|- \[[ xX]\]\s|>\s|```|---|\*\*|__|\[.+\]\(.+\))/;
+
+/**
+ * Quick heuristic to detect markdown-formatted text.
+ * Used by the paste handler to decide whether plain text should be parsed as markdown.
+ */
+export function looksLikeMarkdown(text: string): boolean {
+  return MARKDOWN_PATTERNS.test(text);
 }
 
 export function parseMarkdownToDoc(schema: Schema, markdown: string): ProseMirrorNode {

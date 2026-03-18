@@ -5,7 +5,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { api } from "../../api/client";
 import { useDocumentStore } from "../../stores/document.store";
 import { useUIStore } from "../../stores/ui.store";
-import { parseMarkdownToDoc, serializeDocToMarkdown } from "../../lib/tiptap-markdown";
+import { parseMarkdownToDoc, serializeDocToMarkdown, looksLikeMarkdown } from "../../lib/tiptap-markdown";
 import { createEditorExtensions } from "./extensions";
 import { replaceEditorContentPreservingSelection, promptForLink } from "./editor-utils";
 import {
@@ -262,6 +262,28 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
     },
     editorProps: {
       attributes: { class: "docs-editor-content" },
+      // Export markdown when copying as plain text (Ctrl+C)
+      clipboardTextSerializer: (slice, view) => {
+        const schema = view.state.schema;
+        const wrapper = schema.topNodeType.create(null, slice.content);
+        return serializeDocToMarkdown(schema, wrapper);
+      },
+      // Parse markdown from plain-text paste
+      handlePaste: (view, event) => {
+        // If the clipboard has HTML (e.g. from a rich editor), let TipTap handle it
+        const html = event.clipboardData?.getData("text/html");
+        if (html) return false;
+
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text || !looksLikeMarkdown(text)) return false;
+
+        event.preventDefault();
+        const doc = parseMarkdownToDoc(view.state.schema, text);
+        const { from, to } = view.state.selection;
+        const slice = doc.slice(0, doc.content.size);
+        view.dispatch(view.state.tr.replaceRange(from, to, slice));
+        return true;
+      },
       handleDOMEvents: {
         compositionstart: () => {
           composingRef.current = true;
