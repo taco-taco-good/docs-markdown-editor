@@ -1,24 +1,24 @@
-# Product Requirements Document: Docs Markdown Editor
+# Product Requirements Document: Foldmark
 
-**Product Name:** Docs Markdown Editor
+**Product Name:** Foldmark
 **Status:** Draft
 **Date Created:** 2026-03-07
-**Last Updated:** 2026-03-17
-**Version:** 1.5
+**Last Updated:** 2026-03-19
+**Version:** 1.6
 **License:** MIT
 
 ---
 
-> **Implementation Snapshot (2026-03-17):** 현재 저장소에는 웹 UI, REST API, SSE 기반 변경 전파, 템플릿, 검색, 에셋 업로드, 로컬/OIDC 인증, PAT가 구현되어 있다. 독립 CLI, MCP 서버, Yjs/CRDT 동시편집, JWT 기반 멀티유저 인증, `config.yaml` 설정 파일은 이 문서에 포함된 로드맵/후속 설계 범위이며 아직 저장소에 구현되어 있지 않다.
+> **Implementation Snapshot (2026-03-19):** 현재 저장소에는 로컬 Markdown 워크스페이스를 웹에서 편집하는 UI, REST API, SSE 기반 변경 전파, 템플릿, 검색, 에셋 업로드, 로컬/OIDC 인증, PAT가 구현되어 있다. 독립 CLI, MCP 서버, Yjs/CRDT 동시편집, JWT 기반 멀티유저 인증, `config.yaml` 설정 파일은 이 문서에 포함된 로드맵/후속 설계 범위이며 아직 저장소에 구현되어 있지 않다.
 
 ## Executive Summary
 
-**One-liner:** 파일시스템의 .md 파일을 Source of Truth로 하여, 사람과 AI Agent가 함께 실시간으로 편집할 수 있는 웹 기반 마크다운 에디터
+**One-liner:** 로컬 파일시스템의 `.md` 파일을 Source of Truth로 유지하면서, 웹에서 바로 열고 편집할 수 있게 해주는 파일 기반 Markdown 워크스페이스
 
 **Overview:**
 현재 시장에는 마크다운 문서를 웹에서 편집할 수 있는 서비스가 다수 존재하지만, "실제 .md 파일을 파일시스템에 저장하면서도 우수한 웹 편집 경험을 제공하고, AI Agent가 직접 문서를 편집할 수 있는" 서비스는 전무하다.
 
-Docs Markdown Editor는 이 세 가지 니즈의 교차점을 공략한다. 파일시스템의 마크다운 파일이 곧 데이터이며, 현재 구현 기준으로는 웹 에디터와 REST API, 그리고 파일 직접 편집을 통해 사람과 AI Agent 모두 문서를 편집할 수 있다. CLI/MCP는 후속 로드맵으로 유지한다. 파일이 변경되면 웹에 즉시 반영되고, 웹에서 편집하면 즉시 파일에 저장된다. 특히 문서를 열기만 하거나 변경 없이 저장하는 경우 원본 마크다운이 손상되지 않는 `no-op roundtrip`을 최상위 품질 기준으로 둔다.
+Foldmark는 이 세 가지 니즈의 교차점을 공략한다. 파일시스템의 마크다운 파일이 곧 데이터이며, 현재 구현 기준으로는 로컬 워크스페이스 폴더를 웹 UI에 연결해 브라우저에서 바로 문서를 열고 수정할 수 있다. 또한 REST API와 파일 직접 편집을 통해 사람과 AI Agent 모두 같은 문서를 다룰 수 있다. CLI/MCP는 후속 로드맵으로 유지한다. 파일이 변경되면 웹에 즉시 반영되고, 웹에서 편집하면 즉시 파일에 저장된다. 특히 문서를 열기만 하거나 변경 없이 저장하는 경우 원본 마크다운이 손상되지 않는 `no-op roundtrip`을 최상위 품질 기준으로 둔다.
 
 **Quick Facts:**
 - **Target Users:** AI Agent와 협업하는 개발자/팀, 마크다운 기반 지식 관리 조직
@@ -583,23 +583,23 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 | Req ID | Description | Priority | Status |
 |--------|-------------|----------|--------|
-| FR-001 | 파일시스템 기반 .md 파일 저장/읽기 | P0 | Open |
-| FR-002 | 계층형 디렉토리 탐색 (사이드바) | P0 | Open |
-| FR-003 | 실시간 파일 변경 감지 및 웹 반영 | P0 | Open |
-| FR-004 | WYSIWYG 마크다운 에디터 | P0 | Open |
-| FR-005 | Raw Markdown 편집 모드 | P0 | Open |
-| FR-006 | 실시간 동시 편집 (CRDT) | P1 | Open |
-| FR-007 | CLI 도구 (CRUD + 검색) | P0 | Open |
-| FR-008 | REST API (CRUD + 검색) | P0 | Open |
-| FR-009 | MCP Server | P0 | Open |
-| FR-010 | 전문 검색 | P0 | Open |
-| FR-011 | 위키링크 및 백링크 | P1 | Open |
-| FR-012 | 버전 히스토리 | P1 | Open |
-| FR-013 | Frontmatter 템플릿 + 명시적 메타데이터 편집 | P0 | Open |
-| FR-014 | 문서 생성 템플릿 (`.docs/templates/`) | P0 | Open |
-| FR-015 | 이미지 업로드 → `.assets/` 저장 + 링크 삽입 | P0 | Open |
-| FR-016 | 다이어그램 렌더링 | P2 | Open |
-| FR-017 | 로컬 로그인 + OIDC(Authentik 호환) 인증 | P0 | Open |
+| FR-001 | 파일시스템 기반 .md 파일 저장/읽기 | P0 | Implemented |
+| FR-002 | 계층형 디렉토리 탐색 (사이드바) | P0 | Implemented |
+| FR-003 | 실시간 파일 변경 감지 및 웹 반영 | P0 | Implemented |
+| FR-004 | WYSIWYG 마크다운 에디터 | P0 | Implemented |
+| FR-005 | Raw Markdown 편집 모드 | P0 | Implemented |
+| FR-006 | 실시간 동시 편집 (CRDT) | P1 | Planned |
+| FR-007 | CLI 도구 (CRUD + 검색) | P0 | Planned |
+| FR-008 | REST API (CRUD + 검색) | P0 | Implemented |
+| FR-009 | MCP Server | P0 | Planned |
+| FR-010 | 전문 검색 | P0 | Implemented |
+| FR-011 | 위키링크 및 백링크 | P1 | Planned |
+| FR-012 | 버전 히스토리 | P1 | Planned |
+| FR-013 | Frontmatter 템플릿 + 명시적 메타데이터 편집 | P0 | Partially Implemented |
+| FR-014 | 문서 생성 템플릿 (`.docs/templates/`) | P0 | Implemented |
+| FR-015 | 이미지 업로드 → `.assets/` 저장 + 링크 삽입 | P0 | Implemented |
+| FR-016 | 다이어그램 렌더링 | P2 | Planned |
+| FR-017 | 로컬 로그인 + OIDC(Authentik 호환) 인증 | P0 | Implemented |
 
 ### Non-Functional Requirements
 
@@ -652,7 +652,7 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 ## Scope
 
-### Current Repository Snapshot (2026-03-17)
+### Current Repository Snapshot (2026-03-19)
 
 - 구현 완료: 웹 UI, REST API, SSE 기반 변경 전파, 파일 트리/드래그 앤 드롭, WYSIWYG + Raw 모드, 템플릿, 검색, 에셋 업로드, 로컬/OIDC 인증, PAT
 - 미구현: 독립 CLI 패키지, MCP 서버, Yjs/CRDT 동시편집, JWT 기반 멀티유저 인증, `config.yaml` 기반 설정 계층
@@ -660,7 +660,7 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 
 ### Phase 1: MVP (8주)
 
-**핵심:** 파일 기반 웹 편집 + REST API + 파일시스템 동기화
+**핵심:** 로컬 Markdown 폴더를 웹에서 편집 + REST API + 파일시스템 동기화
 
 - 파일시스템 기반 .md 파일 읽기/쓰기
 - 계층형 디렉토리 사이드바
@@ -668,9 +668,7 @@ So that 별도 도구 없이 다이어그램을 문서에 포함할 수 있다.
 - Raw Markdown 모드 전환
 - no-op roundtrip 보장 (변경 없는 문서는 원문 유지)
 - 실시간 파일 변경 감지 및 웹 반영
-- CLI 도구 (create, read, edit, delete, list, search)
 - REST API (CRUD + 검색)
-- MCP Server (문서 CRUD/Search의 thin adapter)
 - 기본 전문 검색 + 한글/CJK fallback 검색
 - Frontmatter 템플릿 + 명시적 메타데이터 편집
 - 이미지 업로드 → `.assets/` 전역 디렉토리 저장
@@ -921,7 +919,7 @@ DELETE /auth/tokens/:tokenId    # PAT 회수
 **1. 메인 에디터 뷰:**
 ```
 ┌──────────────────────────────────────────────────┐
-│ [Logo] Docs    [Search: Cmd+P]    [👤 Users] [⚙] │
+│ [Foldmark]     [Search: Cmd+P]    [👤 Users] [⚙] │
 ├──────────┬───────────────────────────────────────┤
 │          │ docs / guide / intro.md    [Raw] [📋] │
 │ 📁 docs  │─────────────────────────────────────── │
@@ -933,7 +931,7 @@ DELETE /auth/tokens/:tokenId    # PAT 회수
 │ 📁 notes │                                       │
 │   📄mtg  │ To get started, run:                  │
 │          │ ```bash                               │
-│          │ npx docs-md init                      │
+│          │ npm run serve                         │
 │          │ ```                                   │
 │          │                                       │
 │          │ > This will create a new workspace.   │
