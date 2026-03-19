@@ -10,7 +10,10 @@ import type { Mark, Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 const parserCache = new WeakMap<Schema, MarkdownParser>();
 const serializerCache = new WeakMap<Schema, MarkdownSerializer>();
 type MarkdownStateWithAutolink = MarkdownSerializerState & { inAutolink?: boolean };
-const EMPTY_PARAGRAPH_SENTINEL = "\u00a0";
+// Zero-width space sentinel for empty paragraphs.
+// \u00a0 (non-breaking space) was visible as a space in other editors.
+// \u200b is invisible in all editors and survives markdown-it roundtrip.
+const EMPTY_PARAGRAPH_SENTINEL = "\u200b";
 
 function findListItemClose(tokens: Array<{ type: string }>, startIndex: number): number {
   let depth = 1;
@@ -40,8 +43,38 @@ function stripTaskPrefix(inlineToken: { content: string; children?: Array<{ type
   }
 }
 
+function highlightPlugin(md: MarkdownIt): void {
+  md.inline.ruler.before("emphasis", "highlight", (state, silent) => {
+    const start = state.pos;
+    const max = state.posMax;
+    if (start + 3 >= max) return false;
+    if (state.src.charCodeAt(start) !== 0x3D || state.src.charCodeAt(start + 1) !== 0x3D) return false;
+
+    const end = state.src.indexOf("==", start + 2);
+    if (end < 0 || end === start + 2) return false;
+
+    if (!silent) {
+      const openToken = state.push("highlight_open", "mark", 1);
+      openToken.markup = "==";
+      const tokenizer = state.md.inline;
+      const innerState = new (state.constructor as { new(src: string, md: MarkdownIt, env: unknown, outTokens: Token[]): typeof state })(
+        state.src.slice(start + 2, end), state.md, state.env, []
+      );
+      tokenizer.tokenize(innerState);
+      for (const tok of innerState.tokens) {
+        state.push(tok.type, tok.tag, tok.nesting).content = tok.content;
+      }
+      const closeToken = state.push("highlight_close", "mark", -1);
+      closeToken.markup = "==";
+    }
+    state.pos = end + 2;
+    return true;
+  });
+}
+
 function createTokenizer(): MarkdownIt {
   const tokenizer = MarkdownIt("default", { html: false, linkify: true });
+  highlightPlugin(tokenizer);
 
   tokenizer.core.ruler.after("inline", "docs-task-lists", (state) => {
     const taskLists: Array<{ index: number; itemCount: number; taskCount: number }> = [];
@@ -181,6 +214,7 @@ function createParser(schema: Schema): MarkdownParser {
       }),
     },
     code_inline: { mark: "code", noCloseToken: true },
+    highlight: { mark: "highlight" },
   });
 
   parserCache.set(schema, parser);
@@ -193,7 +227,8 @@ function normalizeParsedNode(schema: Schema, node: ProseMirrorNode): ProseMirror
     content.push(normalizeParsedNode(schema, node.child(index)));
   }
 
-  if (node.type.name === "paragraph" && node.textContent === EMPTY_PARAGRAPH_SENTINEL) {
+  // Strip sentinel characters (current \u200b and legacy \u00a0) back to empty paragraphs
+  if (node.type.name === "paragraph" && (node.textContent === EMPTY_PARAGRAPH_SENTINEL || node.textContent === "\u00a0")) {
     return schema.nodes.paragraph.create(node.attrs);
   }
 
@@ -298,10 +333,9 @@ function createSerializer(schema: Schema): MarkdownSerializer {
       paragraph(state, node) {
         if (node.childCount === 0) {
           state.write(EMPTY_PARAGRAPH_SENTINEL);
-          state.closeBlock(node);
-          return;
+        } else {
+          state.renderInline(node);
         }
-        state.renderInline(node);
         state.closeBlock(node);
       },
       table(state, node) {
@@ -365,12 +399,23 @@ function createSerializer(schema: Schema): MarkdownSerializer {
         mixable: true,
       },
       strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
+      highlight: { open: "==", close: "==", mixable: true, expelEnclosingWhitespace: true },
     },
-    { strict: true },
+    { strict: true, tightLists: true } as { strict: boolean },
   );
 
   serializerCache.set(schema, serializer);
   return serializer;
+}
+
+const MARKDOWN_PATTERNS = /(?:^|\n)(?:#{1,6}\s|[-*+]\s|\d+\.\s|- \[[ xX]\]\s|>\s|```|---|\*\*|__|\[.+\]\(.+\))/;
+
+/**
+ * Quick heuristic to detect markdown-formatted text.
+ * Used by the paste handler to decide whether plain text should be parsed as markdown.
+ */
+export function looksLikeMarkdown(text: string): boolean {
+  return MARKDOWN_PATTERNS.test(text);
 }
 
 export function parseMarkdownToDoc(schema: Schema, markdown: string): ProseMirrorNode {
