@@ -1,5 +1,6 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useAuthStore } from "../../stores/auth.store";
+import { BrandLockup } from "../brand/Brand";
 
 export function LoginPage() {
   const authMethod = useAuthStore((s) => s.authMethod);
@@ -18,24 +19,14 @@ export function LoginPage() {
 
   return (
     <div
-      className="h-full flex items-center justify-center"
-      style={{ background: "var(--color-surface-0)" }}
+      className="h-full flex items-center justify-center px-4"
+      style={{
+        background: "radial-gradient(circle at top, color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-0)) 0%, var(--color-surface-0) 42%)",
+      }}
     >
       <div className="w-full max-w-sm animate-slide-up">
-        {/* Logo */}
-        <div className="text-center mb-10">
-          <h1
-            className="text-xs font-semibold tracking-[0.3em] uppercase mb-2"
-            style={{ color: "var(--color-accent)" }}
-          >
-            Docs
-          </h1>
-          <p
-            className="text-sm"
-            style={{ color: "var(--color-text-tertiary)", fontFamily: "var(--font-body)", fontStyle: "italic" }}
-          >
-            Markdown Editor
-          </p>
+        <div className="mb-10">
+          <BrandLockup size={36} />
         </div>
 
         {authError && (
