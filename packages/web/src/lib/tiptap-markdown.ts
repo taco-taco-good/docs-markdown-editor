@@ -43,8 +43,38 @@ function stripTaskPrefix(inlineToken: { content: string; children?: Array<{ type
   }
 }
 
+function highlightPlugin(md: MarkdownIt): void {
+  md.inline.ruler.before("emphasis", "highlight", (state, silent) => {
+    const start = state.pos;
+    const max = state.posMax;
+    if (start + 3 >= max) return false;
+    if (state.src.charCodeAt(start) !== 0x3D || state.src.charCodeAt(start + 1) !== 0x3D) return false;
+
+    const end = state.src.indexOf("==", start + 2);
+    if (end < 0 || end === start + 2) return false;
+
+    if (!silent) {
+      const openToken = state.push("highlight_open", "mark", 1);
+      openToken.markup = "==";
+      const tokenizer = state.md.inline;
+      const innerState = new (state.constructor as { new(src: string, md: MarkdownIt, env: unknown, outTokens: Token[]): typeof state })(
+        state.src.slice(start + 2, end), state.md, state.env, []
+      );
+      tokenizer.tokenize(innerState);
+      for (const tok of innerState.tokens) {
+        state.push(tok.type, tok.tag, tok.nesting).content = tok.content;
+      }
+      const closeToken = state.push("highlight_close", "mark", -1);
+      closeToken.markup = "==";
+    }
+    state.pos = end + 2;
+    return true;
+  });
+}
+
 function createTokenizer(): MarkdownIt {
   const tokenizer = MarkdownIt("default", { html: false, linkify: true });
+  highlightPlugin(tokenizer);
 
   tokenizer.core.ruler.after("inline", "docs-task-lists", (state) => {
     const taskLists: Array<{ index: number; itemCount: number; taskCount: number }> = [];
@@ -184,6 +214,7 @@ function createParser(schema: Schema): MarkdownParser {
       }),
     },
     code_inline: { mark: "code", noCloseToken: true },
+    highlight: { mark: "highlight" },
   });
 
   parserCache.set(schema, parser);
@@ -368,6 +399,7 @@ function createSerializer(schema: Schema): MarkdownSerializer {
         mixable: true,
       },
       strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
+      highlight: { open: "==", close: "==", mixable: true, expelEnclosingWhitespace: true },
     },
     { strict: true, tightLists: true } as { strict: boolean },
   );

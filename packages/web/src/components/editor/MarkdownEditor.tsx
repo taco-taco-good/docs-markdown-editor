@@ -275,7 +275,7 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
 
         // If the HTML has rich structural tags, let TipTap handle it natively.
         // Otherwise prefer our markdown parser even when HTML is present
-        // (e.g. Discord/Slack wrap plain text in bare <p>/<div> tags).
+        // (e.g. Discord/Slack/Outline wrap plain text in bare <p>/<div> tags).
         const hasRichHtml = html && /<(?:h[1-6]|[uo]l|li|blockquote|pre|table)\b/i.test(html);
         if (hasRichHtml) return false;
 
@@ -284,7 +284,30 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
         event.preventDefault();
         const parsed = parseMarkdownToDoc(view.state.schema, text);
         const slice = parsed.slice(0, parsed.content.size);
-        view.dispatch(view.state.tr.replaceSelection(slice));
+        const { state } = view;
+        const tr = state.tr;
+
+        // Delete current selection first
+        if (!state.selection.empty) {
+          tr.deleteSelection();
+        }
+
+        // Insert at block boundary so block-level nodes (headings, lists)
+        // are placed correctly instead of being flattened into inline text.
+        const $pos = tr.doc.resolve(tr.selection.from);
+        if ($pos.depth === 0) {
+          // Already at doc level
+          tr.replaceRange(tr.selection.from, tr.selection.from, slice);
+        } else if ($pos.parent.content.size === 0) {
+          // Empty block — replace it entirely
+          tr.replaceRange($pos.before($pos.depth), $pos.after($pos.depth), slice);
+        } else {
+          // Inside a non-empty block — insert after the current block
+          const after = $pos.after($pos.depth);
+          tr.replaceRange(after, after, slice);
+        }
+
+        view.dispatch(tr);
         return true;
       },
       handleDOMEvents: {
@@ -504,6 +527,7 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
     { id: "italic", label: "I", title: "기울임", run: () => editor.chain().focus().toggleItalic().run(), active: () => editor.isActive("italic") },
     { id: "strike", label: "S", title: "취소선", run: () => editor.chain().focus().toggleStrike().run(), active: () => editor.isActive("strike") },
     { id: "code", label: "</>", title: "인라인 코드", run: () => editor.chain().focus().toggleCode().run(), active: () => editor.isActive("code") },
+    { id: "highlight", label: "H", title: "하이라이트", run: () => editor.chain().focus().toggleHighlight().run(), active: () => editor.isActive("highlight") },
     { id: "h2", label: "H2", title: "제목 2", run: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: () => editor.isActive("heading", { level: 2 }) },
     { id: "h3", label: "H3", title: "제목 3", run: () => editor.chain().focus().toggleHeading({ level: 3 }).run(), active: () => editor.isActive("heading", { level: 3 }) },
     { id: "h4", label: "H4", title: "제목 4", run: () => editor.chain().focus().toggleHeading({ level: 4 }).run(), active: () => editor.isActive("heading", { level: 4 }) },
@@ -515,7 +539,7 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
     { id: "table", label: "Tbl", title: "표 삽입", run: () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: () => editor.isActive("table") },
     { id: "divider", label: "---", title: "구분선", run: () => editor.chain().focus().setHorizontalRule().run(), active: () => false },
   ];
-  const desktopSelectionActions = formatActions.filter((a) => ["bold", "italic", "code", "link", "bullet", "task"].includes(a.id));
+  const desktopSelectionActions = formatActions.filter((a) => ["bold", "italic", "strike", "code", "highlight", "link", "bullet", "task"].includes(a.id));
 
   const focusOutlineItem = (item: OutlineItem) => {
     const target = editor.view.dom.querySelector<HTMLElement>(`[data-outline-id="${item.id}"]`)
