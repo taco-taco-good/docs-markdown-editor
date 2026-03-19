@@ -1,13 +1,15 @@
-# Technical Design Document: Docs Markdown Editor
+# Technical Design Document: Foldmark
 
-**Version:** 1.5
-**Date:** 2026-03-17
+**Version:** 1.6
+**Date:** 2026-03-19
 **Status:** Draft
 **Refs:** [PRD.md](./PRD.md)
 
 ---
 
-> **Planning baseline:** 이 문서는 현재 구현과 목표 아키텍처를 함께 설명한다. 현재 저장소에는 REST/SSE 기반 단일 사용자 편집, 파일 동기화, 검색, frontmatter/templates, local/OIDC 인증, PAT가 구현되어 있다. 아래 CLI/MCP/Yjs/JWT 관련 내용은 후속 설계 초안으로 읽어야 한다. 최상위 무결성 원칙은 `no-op roundtrip`이며, 변경 없이 열린 문서는 원문 markdown이 그대로 유지되어야 한다.
+> **Planning baseline:** 이 문서는 현재 구현과 목표 아키텍처를 함께 설명한다. 현재 저장소에는 로컬 Markdown 워크스페이스를 웹에서 편집하는 UI, REST/SSE 기반 단일 사용자 편집, 파일 동기화, 검색, frontmatter/templates, local/OIDC 인증, PAT가 구현되어 있다. 아래 CLI/MCP/Yjs/JWT 관련 내용은 후속 설계 초안으로 읽어야 한다. 최상위 무결성 원칙은 `no-op roundtrip`이며, 변경 없이 열린 문서는 원문 markdown이 그대로 유지되어야 한다.
+>
+> **Naming note:** 제품 이름은 Foldmark이지만, 현재 저장소/패키지 이름은 계속 `docs-markdown-editor`를 사용한다.
 
 ## Table of Contents
 
@@ -69,7 +71,7 @@ HTTP 서버는 `node:http`의 `createServer`를 직접 사용한다. Web-standar
 ### Monorepo Layout
 
 ```
-docs-markdown-editor/
+docs-markdown-editor/              # repository name
 ├── packages/
 │   ├── server/                 # 백엔드 서버
 │   │   ├── src/
@@ -1301,25 +1303,30 @@ const resources = [
 git clone https://github.com/user/docs-markdown-editor.git
 cd docs-markdown-editor
 
-# 2. 의존성 설치 (Bun이 workspace를 자동 인식)
-bun install
+# 2. 웹 의존성 설치
+npm --prefix packages/web ci
 
-# 3. 개발 서버 (server + web HMR 동시 실행)
-bun dev
-# → server: http://localhost:3000  (API + WS + static)
-# → web:    http://localhost:5173  (Vite HMR, proxy to :3000)
+# 3. 환경 변수 파일 생성
+cp deploy/env.template .env
+
+# 4. 개발 서버 (server + web HMR 동시 실행)
+npm run dev
+# → server: http://127.0.0.1:3001
+# → web:    http://127.0.0.1:5173
 ```
 
-### 9.2 Bun Scripts
+### 9.2 Runtime Scripts
 
 ```json
 // root package.json
 {
   "scripts": {
-    "dev": "bun run --filter server dev & bun run --filter web dev",
-    "build": "bun run --filter '*' build",
-    "test": "bun run --filter '*' test",
-    "test": "node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
+    "dev": "bash ./deploy/scripts/dev.sh",
+    "dev:server": "bash ./deploy/scripts/dev-server.sh",
+    "dev:web": "bash ./deploy/scripts/dev-web.sh",
+    "serve": "bash ./deploy/scripts/serve.sh",
+    "user:create": "bash ./deploy/scripts/create-local-user.sh",
+    "test": "node --experimental-specifier-resolution=node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
   }
 }
 
@@ -1333,7 +1340,7 @@ bun dev
 }
 ```
 
-> **Note:** 서버 패키지는 별도 빌드 스크립트 없이 Node.js v25+의 네이티브 TS 실행으로 직접 구동한다.
+> **Note:** 서버 패키지는 별도 번들링 없이 Node.js가 TypeScript를 직접 실행하고, 웹 의존성은 `packages/web` 아래에서 관리한다.
 
 ### 9.3 Production Build
 

@@ -1,18 +1,37 @@
-# Docs Markdown Editor
+# Foldmark
 
-파일 트리, WYSIWYG 편집, Raw Markdown fallback, 템플릿, 검색, 에셋 업로드, 로컬 또는 OIDC 인증을 제공하는 self-hosted Markdown 워크스페이스입니다.
+> Repository name: `docs-markdown-editor`
+
+로컬 폴더의 Markdown 문서를 웹에서 바로 열고 편집할 수 있게 해주는 self-hosted Markdown 워크스페이스입니다. 파일 트리, WYSIWYG 편집, Raw Markdown fallback, 템플릿, 검색, 에셋 업로드, 로컬 또는 OIDC 인증을 제공합니다.
 
 ## 프로젝트 소개
 
-Docs Markdown Editor는 디스크에 있는 Markdown 워크스페이스를 편집하기 위한 단일 프로세스 웹 애플리케이션입니다.
+Foldmark는 디스크에 있는 Markdown 워크스페이스를 웹 UI로 편집하기 위한 단일 프로세스 애플리케이션입니다. 로컬 디렉토리를 워크스페이스로 연결하면, 브라우저에서 `.md` 파일을 열고 수정한 내용이 곧바로 파일시스템에 저장됩니다.
 
-핵심 원칙은 단순합니다. 워크스페이스 디렉토리가 곧 실제 데이터입니다. 문서는 일반 `.md` 파일로 저장되고, 에셋은 `.assets/` 아래에 저장되며, 인증 세션이나 UI 정렬 정보 같은 애플리케이션 메타데이터는 `.docs/` 아래에 저장됩니다.
+핵심 원칙은 단순합니다. 워크스페이스 디렉토리가 곧 실제 데이터입니다. 문서는 일반 `.md` 파일로 저장되고, 에셋은 `.assets/` 아래에 저장되며, 인증 세션이나 UI 정렬 정보 같은 애플리케이션 메타데이터는 `.docs/` 아래에 저장됩니다. 즉 Foldmark는 별도 DB에 문서를 가두지 않고, 로컬 Markdown 파일을 그대로 웹에서 다루는 편집 레이어입니다.
 
 서버는 API와 웹 UI를 함께 제공합니다. 프로덕션 스타일 실행에서는 브라우저가 하나의 origin으로 모든 요청을 처리합니다.
 
+## 현재 구현 기준
+
+- 로컬 Markdown 워크스페이스를 웹에서 탐색, 열기, 편집
+- WYSIWYG 에디터와 Raw Markdown 모드 전환
+- 파일 트리 정렬과 문서/폴더 생성
+- 검색, 템플릿, 에셋 업로드
+- 로컬 인증, OIDC 로그인, PAT
+- REST API + SSE 기반 외부 파일 변경 반영
+
+아직 구현되지 않은 범위:
+
+- 독립 CLI 패키지
+- MCP 서버
+- Yjs/CRDT 기반 동시 편집
+- Git 기반 버전 히스토리
+
 ## 주요 기능
 
-- 파일 기반 Markdown 워크스페이스
+- 로컬 파일 기반 Markdown 워크스페이스
+- 로컬 폴더의 `.md` 파일을 웹에서 직접 편집
 - WYSIWYG 에디터와 Raw Markdown 모드
 - 드래그 앤 드롭 정렬이 가능한 폴더/문서 트리
 - 워크스페이스 검색
@@ -208,6 +227,12 @@ docker compose -f deploy/docker/compose.yml up -d
 - 로컬 인증 및 OIDC 설정: `.docs/auth/users.db`
 - 업로드된 에셋: `.assets/...`
 - 파일 정렬 메타데이터: `.docs/tree-order.json`
+
+중요한 점:
+
+- Markdown 원문은 계속 워크스페이스 디렉토리에 남습니다.
+- Foldmark는 그 파일을 웹에서 편집하고 탐색하게 해주는 UI/API 계층입니다.
+- 다른 에디터로 같은 파일을 수정해도 서버가 변경을 감지해 웹 UI에 반영합니다.
 
 ## 유용한 명령
 
