@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { useUIStore } from "../../stores/ui.store";
 import { useDocumentStore } from "../../stores/document.store";
 import { useAuthStore } from "../../stores/auth.store";
+import { BrandLockup } from "../brand/Brand";
 
 function SettingsIcon() {
   return (
@@ -74,14 +75,8 @@ export function Header() {
         </svg>
       </button>
 
-      {/* Logo */}
       <div className="flex items-center gap-2 mr-2 shrink-0">
-        <span
-          className="text-xs font-semibold tracking-widest uppercase"
-          style={{ color: "var(--color-accent)", fontFamily: "var(--font-ui)" }}
-        >
-          Docs
-        </span>
+        <BrandLockup size={22} compact />
       </div>
 
       {workspaceName ? (
