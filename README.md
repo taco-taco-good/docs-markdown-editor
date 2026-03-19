@@ -1,6 +1,6 @@
 # Foldmark
 
-> Repository name: `docs-markdown-editor`
+> GitHub repository: `foldmark`
 
 로컬 폴더의 Markdown 문서를 웹에서 바로 열고 편집할 수 있게 해주는 self-hosted Markdown 워크스페이스입니다. 파일 트리, WYSIWYG 편집, Raw Markdown fallback, 템플릿, 검색, 에셋 업로드, 로컬 또는 OIDC 인증을 제공합니다.
 
