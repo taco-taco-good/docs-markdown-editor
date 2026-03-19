@@ -16,6 +16,28 @@ import {
 } from "./document-sync";
 type EditorMode = "wysiwyg" | "raw";
 
+const LAST_PATH_KEY = "docs-md-last-path";
+
+export function getLastOpenedPath(): string | null {
+  try {
+    return localStorage.getItem(LAST_PATH_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastOpenedPath(path: string | null): void {
+  try {
+    if (path) {
+      localStorage.setItem(LAST_PATH_KEY, path);
+    } else {
+      localStorage.removeItem(LAST_PATH_KEY);
+    }
+  } catch {
+    // localStorage unavailable
+  }
+}
+
 function applyLocalSupport(doc: Document, content: string): Document {
   return {
     ...doc,
@@ -149,6 +171,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     try {
       const doc = await api.getDocument(path);
       const currentMode = get().editorMode;
+      saveLastOpenedPath(path);
       set((current) => ({
         currentPath: path,
         currentDoc: doc,
