@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getSavedThemeId, saveThemeId, resolveTheme, applyTheme, type ThemeDef } from "../lib/themes";
 
 interface UIStore {
   sidebarOpen: boolean;
@@ -6,7 +7,7 @@ interface UIStore {
   searchOpen: boolean;
   outlineOpen: boolean;
   settingsOpen: boolean;
-  theme: "dark" | "light";
+  themeId: string;
   toast: { id: number; message: string; tone: "error" | "info" } | null;
 
   toggleSidebar: () => void;
@@ -18,9 +19,15 @@ interface UIStore {
   toggleOutline: () => void;
   openSettings: () => void;
   closeSettings: () => void;
-  setTheme: (t: "dark" | "light") => void;
+  setTheme: (id: string) => void;
   showToast: (message: string, tone?: "error" | "info") => void;
   clearToast: () => void;
+}
+
+function initTheme(): string {
+  const id = getSavedThemeId();
+  applyTheme(resolveTheme(id));
+  return id;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -29,7 +36,7 @@ export const useUIStore = create<UIStore>((set) => ({
   searchOpen: false,
   outlineOpen: true,
   settingsOpen: false,
-  theme: "dark",
+  themeId: initTheme(),
   toast: null,
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -42,8 +49,16 @@ export const useUIStore = create<UIStore>((set) => ({
   toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen })),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
-  setTheme: (theme) => set({ theme }),
+  setTheme: (themeId) => {
+    const theme = resolveTheme(themeId);
+    applyTheme(theme);
+    saveThemeId(themeId);
+    set({ themeId });
+  },
   showToast: (message, tone = "info") =>
     set({ toast: { id: Date.now(), message, tone } }),
   clearToast: () => set({ toast: null }),
 }));
+
+// Re-export for convenience
+export type { ThemeDef };
