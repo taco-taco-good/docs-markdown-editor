@@ -270,18 +270,21 @@ export function MarkdownEditor({ outlinePortalHost = null }: MarkdownEditorProps
       },
       // Parse markdown from plain-text paste
       handlePaste: (view, event) => {
-        // If the clipboard has HTML (e.g. from a rich editor), let TipTap handle it
         const html = event.clipboardData?.getData("text/html");
-        if (html) return false;
-
         const text = event.clipboardData?.getData("text/plain");
+
+        // If the HTML has rich structural tags, let TipTap handle it natively.
+        // Otherwise prefer our markdown parser even when HTML is present
+        // (e.g. Discord/Slack wrap plain text in bare <p>/<div> tags).
+        const hasRichHtml = html && /<(?:h[1-6]|[uo]l|li|blockquote|pre|table)\b/i.test(html);
+        if (hasRichHtml) return false;
+
         if (!text || !looksLikeMarkdown(text)) return false;
 
         event.preventDefault();
-        const doc = parseMarkdownToDoc(view.state.schema, text);
-        const { from, to } = view.state.selection;
-        const slice = doc.slice(0, doc.content.size);
-        view.dispatch(view.state.tr.replaceRange(from, to, slice));
+        const parsed = parseMarkdownToDoc(view.state.schema, text);
+        const slice = parsed.slice(0, parsed.content.size);
+        view.dispatch(view.state.tr.replaceSelection(slice));
         return true;
       },
       handleDOMEvents: {

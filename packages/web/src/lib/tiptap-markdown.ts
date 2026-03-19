@@ -10,10 +10,10 @@ import type { Mark, Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 const parserCache = new WeakMap<Schema, MarkdownParser>();
 const serializerCache = new WeakMap<Schema, MarkdownSerializer>();
 type MarkdownStateWithAutolink = MarkdownSerializerState & { inAutolink?: boolean };
-// Sentinel removed — empty paragraphs now serialize as truly blank lines.
-// The \u00a0 sentinel previously caused non-breaking spaces to leak into
-// markdown files, corrupting other editors.  An empty string + closeBlock
-// produces the blank line naturally via prosemirror-markdown's flushClose.
+// Zero-width space sentinel for empty paragraphs.
+// \u00a0 (non-breaking space) was visible as a space in other editors.
+// \u200b is invisible in all editors and survives markdown-it roundtrip.
+const EMPTY_PARAGRAPH_SENTINEL = "\u200b";
 
 function findListItemClose(tokens: Array<{ type: string }>, startIndex: number): number {
   let depth = 1;
@@ -196,8 +196,8 @@ function normalizeParsedNode(schema: Schema, node: ProseMirrorNode): ProseMirror
     content.push(normalizeParsedNode(schema, node.child(index)));
   }
 
-  // Strip any legacy \u00a0 sentinel that may still exist in older files
-  if (node.type.name === "paragraph" && node.textContent === "\u00a0") {
+  // Strip sentinel characters (current \u200b and legacy \u00a0) back to empty paragraphs
+  if (node.type.name === "paragraph" && (node.textContent === EMPTY_PARAGRAPH_SENTINEL || node.textContent === "\u00a0")) {
     return schema.nodes.paragraph.create(node.attrs);
   }
 
@@ -300,7 +300,9 @@ function createSerializer(schema: Schema): MarkdownSerializer {
         });
       },
       paragraph(state, node) {
-        if (node.childCount > 0) {
+        if (node.childCount === 0) {
+          state.write(EMPTY_PARAGRAPH_SENTINEL);
+        } else {
           state.renderInline(node);
         }
         state.closeBlock(node);
