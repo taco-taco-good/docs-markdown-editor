@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type PersonalAccessToken } from "../../api/client";
 import { useUIStore } from "../../stores/ui.store";
 import { useAuthStore } from "../../stores/auth.store";
-import { builtinThemes, type ThemeDef } from "../../lib/themes";
+import { darkThemes, lightThemes } from "../../lib/themes";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -131,26 +131,49 @@ export function SettingsPage() {
           {/* Theme section */}
           <section className="settings-section">
             <h3 className="settings-section-title">테마</h3>
-            <div className="settings-theme-grid">
-              {builtinThemes.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className="settings-theme-card"
-                  data-active={t.id === themeId ? "true" : "false"}
-                  onClick={() => setTheme(t.id)}
-                >
-                  <div className="settings-theme-preview">
-                    <span className="settings-theme-swatch" style={{ background: t.colors["surface-2"] }} />
-                    <span className="settings-theme-swatch" style={{ background: t.colors.accent }} />
-                    <span className="settings-theme-swatch" style={{ background: t.colors["text-primary"] }} />
-                    <span className="settings-theme-swatch" style={{ background: t.colors.danger }} />
-                    <span className="settings-theme-swatch" style={{ background: t.colors.success }} />
-                  </div>
-                  <span className="settings-theme-name">{t.name}</span>
-                  {t.appearance === "light" && <span className="settings-theme-badge">Light</span>}
-                </button>
-              ))}
+            <div className="settings-theme-scroll">
+              <h4 className="settings-theme-group-title">Dark</h4>
+              <div className="settings-theme-grid">
+                {darkThemes.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="settings-theme-card"
+                    data-active={t.id === themeId ? "true" : "false"}
+                    onClick={() => setTheme(t.id)}
+                  >
+                    <div className="settings-theme-preview">
+                      <span className="settings-theme-swatch" style={{ background: t.colors["surface-2"] }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.accent }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors["text-primary"] }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.danger }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.success }} />
+                    </div>
+                    <span className="settings-theme-name">{t.name}</span>
+                  </button>
+                ))}
+              </div>
+              <h4 className="settings-theme-group-title">Light</h4>
+              <div className="settings-theme-grid">
+                {lightThemes.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="settings-theme-card"
+                    data-active={t.id === themeId ? "true" : "false"}
+                    onClick={() => setTheme(t.id)}
+                  >
+                    <div className="settings-theme-preview">
+                      <span className="settings-theme-swatch" style={{ background: t.colors["surface-2"] }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.accent }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors["text-primary"] }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.danger }} />
+                      <span className="settings-theme-swatch" style={{ background: t.colors.success }} />
+                    </div>
+                    <span className="settings-theme-name">{t.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 
