@@ -9,7 +9,7 @@ import { LoginPage } from "./components/auth/LoginPage";
 import { SetupPage } from "./components/auth/SetupPage";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAuthStore } from "./stores/auth.store";
-import { useDocumentStore } from "./stores/document.store";
+import { useDocumentStore, getLastOpenedPath } from "./stores/document.store";
 import { useUIStore } from "./stores/ui.store";
 
 export function App() {
@@ -71,6 +71,14 @@ function AuthenticatedApp() {
       setSidebarOpen(false);
     }
   }, [setSidebarOpen]);
+
+  // Restore last opened document
+  useEffect(() => {
+    const lastPath = getLastOpenedPath();
+    if (lastPath && !useDocumentStore.getState().currentPath) {
+      useDocumentStore.getState().openDocument(lastPath);
+    }
+  }, []);
 
   return (
     <div className="h-full flex flex-col">

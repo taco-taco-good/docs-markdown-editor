@@ -1,6 +1,30 @@
 import { create } from "zustand";
 import { getSavedThemeId, saveThemeId, resolveTheme, applyTheme, type ThemeDef } from "../lib/themes";
 
+const OUTLINE_KEY = "docs-md-outline-open";
+
+function isMobile(): boolean {
+  return window.matchMedia("(max-width: 767px)").matches;
+}
+
+function initOutlineOpen(): boolean {
+  if (isMobile()) return false;
+  try {
+    const stored = localStorage.getItem(OUTLINE_KEY);
+    return stored === null ? true : stored === "true";
+  } catch {
+    return true;
+  }
+}
+
+function saveOutlineOpen(open: boolean): void {
+  try {
+    localStorage.setItem(OUTLINE_KEY, String(open));
+  } catch {
+    // localStorage unavailable
+  }
+}
+
 interface UIStore {
   sidebarOpen: boolean;
   sidebarWidth: number;
@@ -34,7 +58,7 @@ export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
   sidebarWidth: 260,
   searchOpen: false,
-  outlineOpen: true,
+  outlineOpen: initOutlineOpen(),
   settingsOpen: false,
   themeId: initTheme(),
   toast: null,
@@ -46,7 +70,12 @@ export const useUIStore = create<UIStore>((set) => ({
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   openSearch: () => set({ searchOpen: true }),
   closeSearch: () => set({ searchOpen: false }),
-  toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen })),
+  toggleOutline: () =>
+    set((s) => {
+      const next = !s.outlineOpen;
+      saveOutlineOpen(next);
+      return { outlineOpen: next };
+    }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   setTheme: (themeId) => {
