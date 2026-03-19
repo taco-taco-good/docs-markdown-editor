@@ -9,7 +9,7 @@
 
 > **Planning baseline:** 이 문서는 현재 구현과 목표 아키텍처를 함께 설명한다. 현재 저장소에는 로컬 Markdown 워크스페이스를 웹에서 편집하는 UI, REST/SSE 기반 단일 사용자 편집, 파일 동기화, 검색, frontmatter/templates, local/OIDC 인증, PAT가 구현되어 있다. 아래 CLI/MCP/Yjs/JWT 관련 내용은 후속 설계 초안으로 읽어야 한다. 최상위 무결성 원칙은 `no-op roundtrip`이며, 변경 없이 열린 문서는 원문 markdown이 그대로 유지되어야 한다.
 >
-> **Naming note:** 제품 이름은 Foldmark이지만, 현재 저장소/패키지 이름은 계속 `docs-markdown-editor`를 사용한다.
+> **Naming note:** 제품/저장소 이름은 Foldmark이며, 일부 패키지명과 내부 식별자는 여전히 `docs-markdown-editor`를 사용한다.
 
 ## Table of Contents
 
@@ -71,7 +71,7 @@ HTTP 서버는 `node:http`의 `createServer`를 직접 사용한다. Web-standar
 ### Monorepo Layout
 
 ```
-docs-markdown-editor/              # repository name
+foldmark/                         # repository name
 ├── packages/
 │   ├── server/                 # 백엔드 서버
 │   │   ├── src/
@@ -1300,8 +1300,8 @@ const resources = [
 
 ```bash
 # 1. 저장소 클론
-git clone https://github.com/user/docs-markdown-editor.git
-cd docs-markdown-editor
+git clone https://github.com/user/foldmark.git
+cd foldmark
 
 # 2. 웹 의존성 설치
 npm --prefix packages/web ci
