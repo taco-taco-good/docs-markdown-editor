@@ -43,6 +43,21 @@ function stripTaskPrefix(inlineToken: { content: string; children?: Array<{ type
   }
 }
 
+function cloneToken(token: Token): Token {
+  const copy = new Token(token.type, token.tag, token.nesting);
+  copy.attrs = token.attrs ? token.attrs.map(([name, value]) => [name, value]) : null;
+  copy.map = token.map ? [...token.map] : null;
+  copy.level = token.level;
+  copy.children = token.children ? token.children.map((child) => cloneToken(child)) : null;
+  copy.content = token.content;
+  copy.markup = token.markup;
+  copy.info = token.info;
+  copy.meta = token.meta ? { ...token.meta } : null;
+  copy.block = token.block;
+  copy.hidden = token.hidden;
+  return copy;
+}
+
 function highlightPlugin(md: MarkdownIt): void {
   md.inline.ruler.before("emphasis", "highlight", (state, silent) => {
     const start = state.pos;
@@ -77,7 +92,15 @@ function createTokenizer(): MarkdownIt {
   highlightPlugin(tokenizer);
 
   tokenizer.core.ruler.after("inline", "docs-task-lists", (state) => {
-    const taskLists: Array<{ index: number; itemCount: number; taskCount: number }> = [];
+    const taskLists: Array<{
+      index: number;
+      itemCount: number;
+      taskItems: Array<{
+        openIndex: number;
+        inlineIndex: number;
+        checked: boolean;
+      }>;
+    }> = [];
     const normalizedTokens: Token[] = [];
 
     for (let index = 0; index < state.tokens.length; index += 1) {
@@ -104,15 +127,79 @@ function createTokenizer(): MarkdownIt {
       const token = state.tokens[index];
 
       if (token.type === "bullet_list_open") {
-        taskLists.push({ index, itemCount: 0, taskCount: 0 });
+        taskLists.push({ index, itemCount: 0, taskItems: [] });
         continue;
       }
 
       if (token.type === "bullet_list_close") {
         const currentList = taskLists.pop();
-        if (currentList && currentList.itemCount > 0 && currentList.taskCount === currentList.itemCount) {
+        if (currentList && currentList.itemCount > 0 && currentList.taskItems.length === currentList.itemCount) {
           state.tokens[currentList.index].type = "task_list_open";
           token.type = "task_list_close";
+          for (const taskItem of currentList.taskItems) {
+            const openToken = state.tokens[taskItem.openIndex];
+            const inlineToken = state.tokens[taskItem.inlineIndex];
+            const closeIndex = findListItemClose(state.tokens, taskItem.openIndex);
+            if (closeIndex < 0) continue;
+            const closeToken = state.tokens[closeIndex];
+
+            openToken.type = "task_item_open";
+            openToken.meta = { ...(openToken.meta ?? {}), checked: taskItem.checked };
+            stripTaskPrefix(inlineToken);
+            closeToken.type = "task_item_close";
+          }
+        } else if (currentList && currentList.taskItems.length > 0) {
+          const closeIndex = index;
+          const taskOpenIndexes = new Set(currentList.taskItems.map((item) => item.openIndex));
+          const taskItemByOpenIndex = new Map(currentList.taskItems.map((item) => [item.openIndex, item]));
+          const replacement: Token[] = [];
+          const listOpenToken = state.tokens[currentList.index];
+          const listCloseToken = state.tokens[closeIndex];
+          let cursor = currentList.index + 1;
+
+          while (cursor < closeIndex) {
+            const listItemCloseIndex = findListItemClose(state.tokens, cursor);
+            if (listItemCloseIndex < 0) break;
+
+            const isTaskSegment = taskOpenIndexes.has(cursor);
+            const segmentOpen = cloneToken(listOpenToken);
+            segmentOpen.type = isTaskSegment ? "task_list_open" : "bullet_list_open";
+            replacement.push(segmentOpen);
+
+            while (cursor < closeIndex) {
+              const itemCloseIndex = findListItemClose(state.tokens, cursor);
+              if (itemCloseIndex < 0) break;
+              const nextIsTask = taskOpenIndexes.has(cursor);
+              if (nextIsTask !== isTaskSegment) break;
+
+              const slice = state.tokens
+                .slice(cursor, itemCloseIndex + 1)
+                .map((sliceToken) => cloneToken(sliceToken));
+
+              if (isTaskSegment) {
+                const taskItem = taskItemByOpenIndex.get(cursor);
+                if (taskItem) {
+                  slice[0].type = "task_item_open";
+                  slice[0].meta = { ...(slice[0].meta ?? {}), checked: taskItem.checked };
+                  const inlineOffset = taskItem.inlineIndex - cursor;
+                  if (inlineOffset >= 0 && inlineOffset < slice.length) {
+                    stripTaskPrefix(slice[inlineOffset]);
+                  }
+                  slice[slice.length - 1].type = "task_item_close";
+                }
+              }
+
+              replacement.push(...slice);
+              cursor = itemCloseIndex + 1;
+            }
+
+            const segmentClose = cloneToken(listCloseToken);
+            segmentClose.type = isTaskSegment ? "task_list_close" : "bullet_list_close";
+            replacement.push(segmentClose);
+          }
+
+          state.tokens.splice(currentList.index, closeIndex - currentList.index + 1, ...replacement);
+          index = currentList.index + replacement.length - 1;
         }
         continue;
       }
@@ -122,23 +209,19 @@ function createTokenizer(): MarkdownIt {
       }
 
       const currentList = taskLists[taskLists.length - 1];
-      currentList.itemCount += 1;
-
       const inlineToken = state.tokens[index + 2];
       const match = inlineToken?.type === "inline" ? /^\[([ xX])\]\s+/.exec(inlineToken.content) : null;
-      if (!match) {
+      const closeIndex = findListItemClose(state.tokens, index);
+      currentList.itemCount += 1;
+      if (!match || closeIndex < 0) {
         continue;
       }
 
-      currentList.taskCount += 1;
-      token.type = "task_item_open";
-      token.meta = { ...(token.meta ?? {}), checked: match[1].toLowerCase() === "x" };
-      stripTaskPrefix(inlineToken);
-
-      const closeIndex = findListItemClose(state.tokens, index);
-      if (closeIndex >= 0) {
-        state.tokens[closeIndex].type = "task_item_close";
-      }
+      currentList.taskItems.push({
+        openIndex: index,
+        inlineIndex: index + 2,
+        checked: match[1].toLowerCase() === "x",
+      });
     }
   });
 
