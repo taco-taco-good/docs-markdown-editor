@@ -128,6 +128,8 @@ export class WatcherService {
             type: "doc:content",
             path: event.path,
             content: document.content,
+            raw: document.raw,
+            revision: document.revision,
             frontmatter: document.frontmatter,
             originClientId: null,
           });

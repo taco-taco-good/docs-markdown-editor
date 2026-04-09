@@ -1,20 +1,23 @@
 import { create } from "zustand";
-import { ApiRequestError, api, type Document, type Frontmatter } from "../api/client";
-import { supportsWysiwygMarkdown } from "../lib/markdown-support";
-import { remapMovedPath } from "../lib/path-utils";
+import { ApiRequestError, api, type Document, type Frontmatter } from "../api/client.js";
+import {
+  clearDocumentDraft,
+  readDocumentDraft,
+  shouldRestoreDocumentDraft,
+  writeDocumentDraft,
+} from "../lib/document-draft.js";
+import { remapMovedPath } from "../lib/path-utils.js";
 import { getEditorClientId } from "../lib/editor-client.js";
 import {
   deriveSaveStatus,
-  mergeConcurrentContent,
-  mergeConcurrentFrontmatter,
-  type RemoteSnapshot,
+  mergeConcurrentMarkdown,
   resolveRemoteUpdate,
   resolveSaveSuccess,
   shouldApplySaveResponse,
   shouldReloadAfterCompositionEnd,
+  type RemoteSnapshot,
   type SaveStatus,
-} from "./document-sync";
-type EditorMode = "wysiwyg" | "raw";
+} from "./document-sync.js";
 
 const LAST_PATH_KEY = "docs-md-last-path";
 
@@ -38,23 +41,12 @@ function saveLastOpenedPath(path: string | null): void {
   }
 }
 
-function applyLocalSupport(doc: Document, content: string): Document {
-  return {
-    ...doc,
-    content,
-    supportedInWysiwyg: supportsWysiwygMarkdown(content),
-  };
-}
-
 interface DocumentStore {
   currentPath: string | null;
   currentDoc: Document | null;
   isDirty: boolean;
   saveStatus: SaveStatus;
-  editorMode: EditorMode;
-  lastSavedContent: string;
-  lastSavedFrontmatter: string;
-  editorSyncVersion: number;
+  lastSavedRaw: string;
   hasPendingRemoteUpdate: boolean;
   pendingRemoteSnapshot: RemoteSnapshot | null;
   isComposing: boolean;
@@ -62,17 +54,16 @@ interface DocumentStore {
   openDocument: (path: string) => Promise<void>;
   reloadCurrentDocument: () => Promise<void>;
   closeDocument: () => void;
-  updateContent: (content: string) => void;
-  saveDocument: () => Promise<void>;
-  updateFrontmatter: (updates: Partial<Frontmatter>) => void;
-  toggleEditorMode: () => void;
-  setEditorMode: (mode: EditorMode) => void;
+  updateRaw: (raw: string) => void;
+  saveDocument: (options?: { keepalive?: boolean }) => Promise<void>;
+  flushPendingSave: (options?: { keepalive?: boolean }) => Promise<void>;
   beginComposition: () => void;
   endComposition: () => void;
   handleExternalUpdate: (
-    content: string,
+    raw: string,
     originClientId?: string | null,
     frontmatter?: Frontmatter | null,
+    revision?: string,
   ) => void;
   handleExternalMove: (from: string, to: string) => void;
 }
@@ -82,10 +73,7 @@ interface StoreSnapshot {
   currentDoc: Document | null;
   isDirty: boolean;
   saveStatus: SaveStatus;
-  editorMode: EditorMode;
-  lastSavedContent: string;
-  lastSavedFrontmatter: string;
-  editorSyncVersion: number;
+  lastSavedRaw: string;
   hasPendingRemoteUpdate: boolean;
   pendingRemoteSnapshot: RemoteSnapshot | null;
   isComposing: boolean;
@@ -96,6 +84,8 @@ const EDITOR_CLIENT_ID = getEditorClientId();
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let editRevision = 0;
 let activeSaveRequest = 0;
+let activeSavePromise: Promise<void> | null = null;
+let queuedSaveOptions: { keepalive?: boolean } | null = null;
 
 function createInitialState(): StoreSnapshot {
   return {
@@ -103,35 +93,11 @@ function createInitialState(): StoreSnapshot {
     currentDoc: null,
     isDirty: false,
     saveStatus: "idle",
-    editorMode: "wysiwyg",
-    lastSavedContent: "",
-    lastSavedFrontmatter: "{}",
-    editorSyncVersion: 0,
+    lastSavedRaw: "",
     hasPendingRemoteUpdate: false,
     pendingRemoteSnapshot: null,
     isComposing: false,
   };
-}
-
-function parseFrontmatterSnapshot(frontmatter: string): Frontmatter {
-  try {
-    return JSON.parse(frontmatter) as Frontmatter;
-  } catch {
-    return {};
-  }
-}
-
-function getVersionMismatchDocument(error: unknown): Document | null {
-  if (!(error instanceof ApiRequestError) || error.code !== "VERSION_MISMATCH") {
-    return null;
-  }
-
-  const details = error.details;
-  if (!details || typeof details !== "object" || !("document" in details)) {
-    return null;
-  }
-
-  return (details as { document?: Document }).document ?? null;
 }
 
 function clearScheduledSave() {
@@ -139,6 +105,22 @@ function clearScheduledSave() {
     clearTimeout(saveTimeout);
     saveTimeout = null;
   }
+}
+
+function mergeSaveOptions(
+  current: { keepalive?: boolean } | null,
+  next?: { keepalive?: boolean },
+): { keepalive?: boolean } | null {
+  if (!current && !next) return null;
+  return {
+    keepalive: Boolean(current?.keepalive || next?.keepalive),
+  };
+}
+
+function resetSaveCoordinator() {
+  activeSaveRequest = 0;
+  activeSavePromise = null;
+  queuedSaveOptions = null;
 }
 
 function scheduleSave(delayMs = 300) {
@@ -155,13 +137,51 @@ function scheduleSave(delayMs = 300) {
   }, delayMs);
 }
 
+function replaceCurrentDocRaw(doc: Document, raw: string, frontmatter?: Frontmatter | null, revision?: string): Document {
+  const metaChanged = frontmatter != null || revision != null;
+  return {
+    ...doc,
+    raw,
+    content: raw,
+    meta: metaChanged
+      ? {
+          ...doc.meta,
+          ...(frontmatter != null ? { frontmatter } : {}),
+          ...(revision != null ? { revision } : {}),
+        }
+      : doc.meta,
+  };
+}
+
+function getVersionMismatchDocument(error: unknown): Document | null {
+  if (!(error instanceof ApiRequestError) || error.code !== "VERSION_MISMATCH") {
+    return null;
+  }
+
+  const details = error.details;
+  if (!details || typeof details !== "object" || !("document" in details)) {
+    return null;
+  }
+
+  return (details as { document?: Document }).document ?? null;
+}
+
+function persistDraftForState(state: Pick<StoreSnapshot, "currentPath" | "currentDoc" | "lastSavedRaw">): void {
+  if (!state.currentPath || !state.currentDoc) return;
+  writeDocumentDraft(state.currentPath, {
+    raw: state.currentDoc.raw,
+    lastSavedRaw: state.lastSavedRaw,
+    baseRevision: state.currentDoc.meta.revision,
+  });
+}
+
 export const useDocumentStore = create<DocumentStore>((set, get) => ({
   ...createInitialState(),
 
   openDocument: async (path) => {
     clearScheduledSave();
     editRevision = 0;
-    activeSaveRequest = 0;
+    resetSaveCoordinator();
 
     const state = get();
     if (state.isDirty && state.currentPath) {
@@ -170,21 +190,30 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
 
     try {
       const doc = await api.getDocument(path);
-      const currentMode = get().editorMode;
+      const draft = readDocumentDraft(path);
+      const shouldRestoreDraft = draft ? shouldRestoreDocumentDraft(doc, draft) : false;
+      const restoredRaw = shouldRestoreDraft && draft ? draft.raw : doc.raw;
+
       saveLastOpenedPath(path);
-      set((current) => ({
+      set({
         currentPath: path,
-        currentDoc: doc,
-        isDirty: false,
-        saveStatus: "saved",
-        lastSavedContent: doc.content,
-        lastSavedFrontmatter: JSON.stringify(doc.meta.frontmatter),
-        editorMode: doc.supportedInWysiwyg ? currentMode : "raw",
-        editorSyncVersion: current.editorSyncVersion + 1,
+        currentDoc: {
+          ...doc,
+          raw: restoredRaw,
+          content: restoredRaw,
+        },
+        isDirty: shouldRestoreDraft,
+        saveStatus: shouldRestoreDraft ? "idle" : "saved",
+        lastSavedRaw: doc.raw,
         hasPendingRemoteUpdate: false,
         pendingRemoteSnapshot: null,
         isComposing: false,
-      }));
+      });
+      if (shouldRestoreDraft) {
+        scheduleSave(100);
+      } else {
+        clearDocumentDraft(path);
+      }
     } catch (error) {
       console.error("Failed to open document:", error);
     }
@@ -198,20 +227,20 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
 
     try {
       const doc = await api.getDocument(state.currentPath);
-      set((current) => ({
-        currentDoc: doc,
+      set({
+        currentDoc: {
+          ...doc,
+          content: doc.raw,
+        },
         isDirty: false,
         saveStatus: "saved",
-        lastSavedContent: doc.content,
-        lastSavedFrontmatter: JSON.stringify(doc.meta.frontmatter),
-        editorMode: doc.supportedInWysiwyg ? current.editorMode : "raw",
-        editorSyncVersion: current.editorSyncVersion + 1,
+        lastSavedRaw: doc.raw,
         hasPendingRemoteUpdate: false,
         pendingRemoteSnapshot: null,
         isComposing: false,
-      }));
+      });
       editRevision = 0;
-      activeSaveRequest = 0;
+      resetSaveCoordinator();
     } catch (error) {
       console.error("Failed to reload document:", error);
       set({ saveStatus: "conflict" });
@@ -221,83 +250,71 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   closeDocument: () => {
     clearScheduledSave();
     editRevision = 0;
-    activeSaveRequest = 0;
+    resetSaveCoordinator();
     set(createInitialState());
   },
 
-  updateContent: (content) => {
+  updateRaw: (raw) => {
     const state = get();
     if (!state.currentDoc) return;
 
     editRevision += 1;
-    const nextDoc = applyLocalSupport(state.currentDoc, content);
-    const isDirty =
-      content !== state.lastSavedContent ||
-      JSON.stringify(nextDoc.meta.frontmatter) !== state.lastSavedFrontmatter;
-
     set({
-      currentDoc: nextDoc,
-      isDirty,
-      saveStatus: isDirty ? "idle" : "saved",
+      currentDoc: replaceCurrentDocRaw(state.currentDoc, raw),
+      isDirty: raw !== state.lastSavedRaw,
+      saveStatus: raw !== state.lastSavedRaw ? "idle" : "saved",
     });
+    const nextState = get();
+    if (raw !== nextState.lastSavedRaw) {
+      persistDraftForState(nextState);
+    } else if (nextState.currentPath) {
+      clearDocumentDraft(nextState.currentPath);
+    }
 
     scheduleSave();
   },
 
-  saveDocument: async () => {
+  flushPendingSave: async (options) => {
+    clearScheduledSave();
+    await get().saveDocument(options);
+  },
+
+  saveDocument: async (options) => {
+    if (activeSavePromise) {
+      queuedSaveOptions = mergeSaveOptions(queuedSaveOptions, options);
+      return activeSavePromise;
+    }
+
+    const runSave = async () => {
     const state = get();
     if (!state.currentPath || !state.currentDoc) return;
-    const nextFrontmatter = JSON.stringify(state.currentDoc.meta.frontmatter);
-    const contentChanged = state.currentDoc.content !== state.lastSavedContent;
-    const frontmatterChanged = nextFrontmatter !== state.lastSavedFrontmatter;
-    if (!contentChanged && !frontmatterChanged) {
+    const contentChanged = state.currentDoc.raw !== state.lastSavedRaw;
+
+    if (!contentChanged) {
       if (state.pendingRemoteSnapshot && state.currentDoc) {
-        const mergedContent = mergeConcurrentContent({
-          base: state.pendingRemoteSnapshot.baseContent,
-          local: state.currentDoc.content,
-          remote: state.pendingRemoteSnapshot.content,
+        const merged = mergeConcurrentMarkdown({
+          base: state.pendingRemoteSnapshot.baseRaw,
+          local: state.currentDoc.raw,
+          remote: state.pendingRemoteSnapshot.raw,
         });
-        const mergedFrontmatter = mergeConcurrentFrontmatter({
-          base: state.pendingRemoteSnapshot.baseFrontmatter,
-          local: JSON.stringify(state.currentDoc.meta.frontmatter),
-          remote: state.pendingRemoteSnapshot.frontmatter,
-        });
-        const nextContent = mergedContent.content;
-        const nextFrontmatter = parseFrontmatterSnapshot(mergedFrontmatter.frontmatter);
-        const droppedRemoteChanges =
-          mergedContent.droppedRemoteChanges || mergedFrontmatter.droppedRemoteChanges;
-        const contentDidChange = nextContent !== state.currentDoc.content;
-        const didChange =
-          contentDidChange ||
-          mergedFrontmatter.frontmatter !== JSON.stringify(state.currentDoc.meta.frontmatter);
-        if (didChange) {
+
+        if (merged.raw !== state.currentDoc.raw) {
           editRevision += 1;
           set((current) => ({
-            currentDoc: current.currentDoc
-              ? applyLocalSupport({
-                  ...current.currentDoc,
-                  meta: {
-                    ...current.currentDoc.meta,
-                    frontmatter: nextFrontmatter,
-                  },
-                }, nextContent)
-              : null,
+            currentDoc: current.currentDoc ? replaceCurrentDocRaw(current.currentDoc, merged.raw) : null,
             isDirty: true,
-            saveStatus: droppedRemoteChanges ? "conflict" : "idle",
-            // Never bump editorSyncVersion during merge — the editor owns its
-            // content while the user is active.  Replacing the full ProseMirror
-            // doc mid-edit causes cursor jumps and content overwrites.
-            // The merged content will reach the server on the next save cycle.
+            saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
             hasPendingRemoteUpdate: false,
             pendingRemoteSnapshot: null,
           }));
           scheduleSave(80);
           return;
         }
+
         set({
           hasPendingRemoteUpdate: false,
           pendingRemoteSnapshot: null,
-          saveStatus: droppedRemoteChanges
+          saveStatus: merged.droppedRemoteChanges
             ? "conflict"
             : deriveSaveStatus({ hasPendingRemoteUpdate: false, isDirty: state.isDirty }),
         });
@@ -310,8 +327,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     }
 
     const requestedPath = state.currentPath;
-    const requestedContent = state.currentDoc.content;
-    const requestedFrontmatter = JSON.stringify(state.currentDoc.meta.frontmatter);
+    const requestedRaw = state.currentDoc.raw;
     const requestRevision = editRevision;
     const requestId = ++activeSaveRequest;
 
@@ -319,9 +335,9 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     try {
       const doc = await api.saveDocument(
         requestedPath,
-        requestedContent,
-        frontmatterChanged ? state.currentDoc.meta.frontmatter : undefined,
+        requestedRaw,
         state.currentDoc.meta.revision,
+        options?.keepalive ? { keepalive: true } : undefined,
       );
 
       const latestState = get();
@@ -336,87 +352,67 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       })) {
         return;
       }
+
       const hasNewerLocalEdits =
         editRevision !== requestRevision ||
-        latestCurrentDoc.content !== requestedContent ||
-        JSON.stringify(latestCurrentDoc.meta.frontmatter) !== requestedFrontmatter;
+        latestCurrentDoc.raw !== requestedRaw;
 
       if (requestId !== activeSaveRequest || hasNewerLocalEdits) {
         set({
-          lastSavedContent: requestedContent,
-          lastSavedFrontmatter: JSON.stringify(doc.meta.frontmatter),
+          currentDoc: latestCurrentDoc
+            ? replaceCurrentDocRaw(latestCurrentDoc, latestCurrentDoc.raw, doc.meta.frontmatter, doc.meta.revision)
+            : null,
+          lastSavedRaw: requestedRaw,
           saveStatus: resolveSaveSuccess({
             hasPendingRemoteUpdate: latestState.hasPendingRemoteUpdate,
             hasNewerLocalEdits: true,
             isDirty: latestState.isDirty,
-            requestedContent,
+            requestedRaw,
           }).saveStatus,
         });
         if (latestState.isDirty) {
+          persistDraftForState(get());
           scheduleSave(150);
         }
         return;
       }
 
-      const mergedDoc = latestCurrentDoc
-        ? {
-            ...doc,
-            content: latestCurrentDoc.content,
-            supportedInWysiwyg: supportsWysiwygMarkdown(latestCurrentDoc.content),
-          }
-        : doc;
-
       set({
-        currentDoc: mergedDoc,
+        currentDoc: {
+          ...doc,
+          content: doc.raw,
+        },
         isDirty: false,
         saveStatus: resolveSaveSuccess({
           hasPendingRemoteUpdate: latestState.hasPendingRemoteUpdate,
           hasNewerLocalEdits: false,
           isDirty: false,
-          requestedContent,
+          requestedRaw,
         }).saveStatus,
-        lastSavedContent: requestedContent,
-        lastSavedFrontmatter: JSON.stringify(doc.meta.frontmatter),
+        lastSavedRaw: requestedRaw,
       });
+      clearDocumentDraft(requestedPath);
+
       if (latestState.pendingRemoteSnapshot) {
-        const mergedContent = mergeConcurrentContent({
-          base: latestState.pendingRemoteSnapshot.baseContent,
-          local: requestedContent,
-          remote: latestState.pendingRemoteSnapshot.content,
+        const merged = mergeConcurrentMarkdown({
+          base: latestState.pendingRemoteSnapshot.baseRaw,
+          local: requestedRaw,
+          remote: latestState.pendingRemoteSnapshot.raw,
         });
-        const mergedFrontmatter = mergeConcurrentFrontmatter({
-          base: latestState.pendingRemoteSnapshot.baseFrontmatter,
-          local: requestedFrontmatter,
-          remote: latestState.pendingRemoteSnapshot.frontmatter,
-        });
-        const nextFrontmatter = parseFrontmatterSnapshot(mergedFrontmatter.frontmatter);
-        const nextContent = mergedContent.content;
-        const droppedRemoteChanges =
-          mergedContent.droppedRemoteChanges || mergedFrontmatter.droppedRemoteChanges;
-        const didChange =
-          nextContent !== requestedContent ||
-          mergedFrontmatter.frontmatter !== requestedFrontmatter;
+        const didChange = merged.raw !== requestedRaw;
 
         set((current) => ({
           currentDoc: current.currentDoc
-            ? applyLocalSupport({
-                ...current.currentDoc,
-                meta: {
-                  ...current.currentDoc.meta,
-                  frontmatter: didChange ? nextFrontmatter : current.currentDoc.meta.frontmatter,
-                },
-              }, didChange ? nextContent : current.currentDoc.content)
+            ? replaceCurrentDocRaw(current.currentDoc, didChange ? merged.raw : current.currentDoc.raw)
             : null,
           isDirty: didChange,
-          saveStatus: droppedRemoteChanges ? "conflict" : didChange ? "idle" : "saved",
-          // Do NOT bump editorSyncVersion here — let the editor keep its
-          // current ProseMirror state.  The store content is updated and the
-          // next onUpdate/save cycle will reconcile naturally.
+          saveStatus: merged.droppedRemoteChanges ? "conflict" : didChange ? "idle" : "saved",
           hasPendingRemoteUpdate: false,
           pendingRemoteSnapshot: null,
         }));
         if (didChange) {
           editRevision += 1;
+          persistDraftForState(get());
           scheduleSave(80);
         }
       } else if (latestState.hasPendingRemoteUpdate) {
@@ -425,40 +421,27 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     } catch (error) {
       const latestDocument = getVersionMismatchDocument(error);
       if (latestDocument && get().currentPath === requestedPath) {
-        const latestFrontmatter = JSON.stringify(latestDocument.meta.frontmatter);
-        const mergedContent = mergeConcurrentContent({
-          base: state.lastSavedContent,
-          local: requestedContent,
-          remote: latestDocument.content,
+        const merged = mergeConcurrentMarkdown({
+          base: state.lastSavedRaw,
+          local: requestedRaw,
+          remote: latestDocument.raw,
         });
-        const mergedFrontmatter = mergeConcurrentFrontmatter({
-          base: state.lastSavedFrontmatter,
-          local: requestedFrontmatter,
-          remote: latestFrontmatter,
-        });
-        const droppedRemoteChanges =
-          mergedContent.droppedRemoteChanges || mergedFrontmatter.droppedRemoteChanges;
-        const nextContent = mergedContent.content;
-        const nextFrontmatter = parseFrontmatterSnapshot(mergedFrontmatter.frontmatter);
 
         set(() => ({
-          currentDoc: applyLocalSupport({
+          currentDoc: {
             ...latestDocument,
-            meta: {
-              ...latestDocument.meta,
-              frontmatter: nextFrontmatter,
-            },
-          }, nextContent),
+            content: merged.raw,
+            raw: merged.raw,
+          },
           isDirty: true,
-          saveStatus: droppedRemoteChanges ? "conflict" : "idle",
-          lastSavedContent: latestDocument.content,
-          lastSavedFrontmatter: latestFrontmatter,
-          // Do NOT bump editorSyncVersion during conflict resolution.
+          saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
+          lastSavedRaw: latestDocument.raw,
           hasPendingRemoteUpdate: false,
           pendingRemoteSnapshot: null,
         }));
-        if (!droppedRemoteChanges) {
+        if (!merged.droppedRemoteChanges) {
           editRevision += 1;
+          persistDraftForState(get());
           scheduleSave(80);
         }
         return;
@@ -467,40 +450,26 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         set({ saveStatus: "conflict" });
       }
     }
-  },
+    };
 
-  updateFrontmatter: (updates) => {
-    const state = get();
-    if (!state.currentDoc) return;
+    activeSavePromise = runSave().finally(() => {
+      activeSavePromise = null;
+      const followUp = queuedSaveOptions;
+      queuedSaveOptions = null;
+      if (!followUp) return;
 
-    editRevision += 1;
-    set({
-      currentDoc: {
-        ...state.currentDoc,
-        meta: {
-          ...state.currentDoc.meta,
-          frontmatter: { ...state.currentDoc.meta.frontmatter, ...updates },
-        },
-      },
-      isDirty: true,
-      saveStatus: "idle",
+      const latestState = get();
+      if (!latestState.currentPath || !latestState.currentDoc) return;
+      if (latestState.isComposing) {
+        scheduleSave(100);
+        return;
+      }
+      if (latestState.isDirty || latestState.hasPendingRemoteUpdate) {
+        void latestState.saveDocument(followUp);
+      }
     });
-    scheduleSave();
-  },
 
-  toggleEditorMode: () => {
-    set((state) => ({
-      editorMode: state.editorMode === "wysiwyg" ? "raw" : "wysiwyg",
-    }));
-  },
-
-  setEditorMode: (mode) => {
-    const state = get();
-    if (mode === "wysiwyg" && state.currentDoc && !state.currentDoc.supportedInWysiwyg) {
-      set({ editorMode: "raw" });
-      return;
-    }
-    set({ editorMode: mode });
+    return activeSavePromise;
   },
 
   beginComposition: () => {
@@ -519,22 +488,15 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     }
   },
 
-  handleExternalUpdate: (content, originClientId, frontmatter) => {
+  handleExternalUpdate: (raw, originClientId, frontmatter, revision) => {
     const state = get();
     if (!state.currentDoc) return;
-    const currentFrontmatter = JSON.stringify(state.currentDoc.meta.frontmatter);
 
-    // Also treat "saving" as busy — a save is in-flight and the response
-    // may update lastSavedContent, so applying now would race.
     const effectivelyDirty = state.isDirty || state.saveStatus === "saving";
-
     const resolution = resolveRemoteUpdate({
-      content,
-      frontmatter: frontmatter ? JSON.stringify(frontmatter) : currentFrontmatter,
-      currentContent: state.currentDoc.content,
-      currentFrontmatter,
-      lastSavedContent: state.lastSavedContent,
-      lastSavedFrontmatter: state.lastSavedFrontmatter,
+      raw,
+      currentRaw: state.currentDoc.raw,
+      lastSavedRaw: state.lastSavedRaw,
       isDirty: effectivelyDirty,
       isComposing: state.isComposing,
       hasPendingRemoteUpdate: state.hasPendingRemoteUpdate,
@@ -553,27 +515,19 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       return;
     }
 
-    set((current) => {
-      const contentDidChange = resolution.content !== current.currentDoc?.content;
-      return {
-        currentDoc: current.currentDoc
-          ? applyLocalSupport({
-              ...current.currentDoc,
-              meta: {
-                ...current.currentDoc.meta,
-                frontmatter: parseFrontmatterSnapshot(resolution.frontmatter),
-              },
-            }, resolution.content)
-          : null,
-        isDirty: false,
-        saveStatus: resolution.saveStatus,
-        lastSavedContent: resolution.content,
-        lastSavedFrontmatter: resolution.frontmatter,
-        editorSyncVersion: contentDidChange ? current.editorSyncVersion + 1 : current.editorSyncVersion,
-        hasPendingRemoteUpdate: false,
-        pendingRemoteSnapshot: null,
-      };
-    });
+    set((current) => ({
+      currentDoc: current.currentDoc
+        ? replaceCurrentDocRaw(current.currentDoc, resolution.raw, frontmatter, revision)
+        : null,
+      isDirty: false,
+      saveStatus: resolution.saveStatus,
+      lastSavedRaw: resolution.raw,
+      hasPendingRemoteUpdate: false,
+      pendingRemoteSnapshot: null,
+    }));
+    if (state.currentPath) {
+      clearDocumentDraft(state.currentPath);
+    }
   },
 
   handleExternalMove: (from, to) => {
@@ -600,6 +554,6 @@ export function getDocumentEditorClientId(): string {
 export function resetDocumentStoreForTests(): void {
   clearScheduledSave();
   editRevision = 0;
-  activeSaveRequest = 0;
+  resetSaveCoordinator();
   useDocumentStore.setState(createInitialState());
 }

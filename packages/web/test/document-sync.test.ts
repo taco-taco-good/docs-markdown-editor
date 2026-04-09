@@ -3,8 +3,7 @@ import test from "node:test";
 
 import {
   deriveSaveStatus,
-  mergeConcurrentContent,
-  mergeConcurrentFrontmatter,
+  mergeConcurrentMarkdown,
   resolveRemoteUpdate,
   resolveSaveSuccess,
   shouldApplySaveResponse,
@@ -19,12 +18,9 @@ test("deriveSaveStatus is based on local save progress, not queued remote sync",
 
 test("resolveRemoteUpdate ignores self echoes", () => {
   const result = resolveRemoteUpdate({
-    content: "remote",
-    frontmatter: "{\"title\":\"Remote\"}",
-    currentContent: "local",
-    currentFrontmatter: "{\"title\":\"Local\"}",
-    lastSavedContent: "saved",
-    lastSavedFrontmatter: "{\"title\":\"Saved\"}",
+    raw: "remote",
+    currentRaw: "local",
+    lastSavedRaw: "saved",
     isDirty: false,
     isComposing: false,
     hasPendingRemoteUpdate: false,
@@ -37,12 +33,9 @@ test("resolveRemoteUpdate ignores self echoes", () => {
 
 test("resolveRemoteUpdate queues remote content while typing or composing", () => {
   const dirtyResult = resolveRemoteUpdate({
-    content: "remote",
-    frontmatter: "{\"title\":\"Remote\"}",
-    currentContent: "local",
-    currentFrontmatter: "{\"title\":\"Local\"}",
-    lastSavedContent: "base",
-    lastSavedFrontmatter: "{\"title\":\"Base\"}",
+    raw: "remote",
+    currentRaw: "local",
+    lastSavedRaw: "base",
     isDirty: true,
     isComposing: false,
     hasPendingRemoteUpdate: false,
@@ -52,20 +45,15 @@ test("resolveRemoteUpdate queues remote content while typing or composing", () =
   assert.deepEqual(dirtyResult, {
     action: "queue",
     snapshot: {
-      content: "remote",
-      frontmatter: "{\"title\":\"Remote\"}",
-      baseContent: "base",
-      baseFrontmatter: "{\"title\":\"Base\"}",
+      raw: "remote",
+      baseRaw: "base",
     },
   });
 
   const composingResult = resolveRemoteUpdate({
-    content: "remote",
-    frontmatter: "{\"title\":\"Remote\"}",
-    currentContent: "local",
-    currentFrontmatter: "{\"title\":\"Local\"}",
-    lastSavedContent: "base",
-    lastSavedFrontmatter: "{\"title\":\"Base\"}",
+    raw: "remote",
+    currentRaw: "local",
+    lastSavedRaw: "base",
     isDirty: false,
     isComposing: true,
     hasPendingRemoteUpdate: false,
@@ -75,22 +63,17 @@ test("resolveRemoteUpdate queues remote content while typing or composing", () =
   assert.deepEqual(composingResult, {
     action: "queue",
     snapshot: {
-      content: "remote",
-      frontmatter: "{\"title\":\"Remote\"}",
-      baseContent: "base",
-      baseFrontmatter: "{\"title\":\"Base\"}",
+      raw: "remote",
+      baseRaw: "base",
     },
   });
 });
 
 test("resolveRemoteUpdate applies clean external changes without conflict", () => {
   const result = resolveRemoteUpdate({
-    content: "remote",
-    frontmatter: "{\"title\":\"Remote\"}",
-    currentContent: "local",
-    currentFrontmatter: "{\"title\":\"Local\"}",
-    lastSavedContent: "saved",
-    lastSavedFrontmatter: "{\"title\":\"Saved\"}",
+    raw: "remote",
+    currentRaw: "local",
+    lastSavedRaw: "saved",
     isDirty: false,
     isComposing: false,
     hasPendingRemoteUpdate: false,
@@ -100,8 +83,7 @@ test("resolveRemoteUpdate applies clean external changes without conflict", () =
 
   assert.deepEqual(result, {
     action: "apply",
-    content: "remote",
-    frontmatter: "{\"title\":\"Remote\"}",
+    raw: "remote",
     saveStatus: "saved",
   });
 });
@@ -111,10 +93,10 @@ test("resolveSaveSuccess preserves last acknowledged content while keeping dirty
     hasPendingRemoteUpdate: false,
     hasNewerLocalEdits: true,
     isDirty: true,
-    requestedContent: "saved snapshot",
+    requestedRaw: "saved snapshot",
   });
   assert.deepEqual(newerLocalEdits, {
-    lastSavedContent: "saved snapshot",
+    lastSavedRaw: "saved snapshot",
     saveStatus: "idle",
   });
 
@@ -122,10 +104,10 @@ test("resolveSaveSuccess preserves last acknowledged content while keeping dirty
     hasPendingRemoteUpdate: true,
     hasNewerLocalEdits: false,
     isDirty: false,
-    requestedContent: "saved snapshot",
+    requestedRaw: "saved snapshot",
   });
   assert.deepEqual(pendingRemote, {
-    lastSavedContent: "saved snapshot",
+    lastSavedRaw: "saved snapshot",
     saveStatus: "saved",
   });
 });
@@ -154,53 +136,29 @@ test("shouldApplySaveResponse rejects stale saves from another document context"
   }), false);
 });
 
-test("mergeConcurrentContent merges non-overlapping line edits", () => {
-  const result = mergeConcurrentContent({
+test("mergeConcurrentMarkdown merges non-overlapping line edits", () => {
+  const result = mergeConcurrentMarkdown({
     base: "A\nB\nC\n",
     local: "A\nB-local\nC\n",
     remote: "A\nB\nC\nD-remote\n",
   });
 
   assert.deepEqual(result, {
-    content: "A\nB-local\nC\nD-remote\n",
+    raw: "A\nB-local\nC\nD-remote\n",
     hadRemoteChanges: true,
     droppedRemoteChanges: false,
   });
 });
 
-test("mergeConcurrentContent keeps local text on overlapping edits", () => {
-  const result = mergeConcurrentContent({
+test("mergeConcurrentMarkdown keeps local text on overlapping edits", () => {
+  const result = mergeConcurrentMarkdown({
     base: "hello\n",
     local: "hello local\n",
     remote: "hello remote\n",
   });
 
   assert.deepEqual(result, {
-    content: "hello local\n",
-    hadRemoteChanges: true,
-    droppedRemoteChanges: true,
-  });
-});
-
-test("mergeConcurrentFrontmatter merges field-level changes and prefers local on overlap", () => {
-  const merged = mergeConcurrentFrontmatter({
-    base: JSON.stringify({ title: "Base", tags: ["a"] }),
-    local: JSON.stringify({ title: "Local", tags: ["a"] }),
-    remote: JSON.stringify({ title: "Base", tags: ["a"], status: "draft" }),
-  });
-  assert.deepEqual(merged, {
-    frontmatter: JSON.stringify({ title: "Local", tags: ["a"], status: "draft" }),
-    hadRemoteChanges: true,
-    droppedRemoteChanges: false,
-  });
-
-  const overlap = mergeConcurrentFrontmatter({
-    base: JSON.stringify({ title: "Base" }),
-    local: JSON.stringify({ title: "Local" }),
-    remote: JSON.stringify({ title: "Remote" }),
-  });
-  assert.deepEqual(overlap, {
-    frontmatter: JSON.stringify({ title: "Local" }),
+    raw: "hello local\n",
     hadRemoteChanges: true,
     droppedRemoteChanges: true,
   });

@@ -37,6 +37,7 @@ export async function handleDocsRoutes(
 
   if (request.method === "PUT" || request.method === "PATCH") {
     const body = await readJson(request);
+    const hasRaw = typeof body.raw === "string";
     const hasContent = typeof body.content === "string";
     const hasTemplate =
       typeof request.headers.get("x-template") === "string" ||
@@ -46,7 +47,7 @@ export async function handleDocsRoutes(
       typeof body.frontmatter === "object" &&
       !Array.isArray(body.frontmatter);
 
-    if (!hasContent && !hasFrontmatter && !hasTemplate) {
+    if (!hasRaw && !hasContent && !hasFrontmatter && !hasTemplate) {
       throw new Error("VALIDATION_ERROR");
     }
 
@@ -83,7 +84,9 @@ export async function handleDocsRoutes(
           provider: actor.provider,
         });
 
-    if (hasContent) {
+    if (hasRaw) {
+      document = ctx.documentService.writeRaw(docsPath, String(body.raw), actor);
+    } else if (hasContent) {
       document = ctx.documentService.write(docsPath, String(body.content), actor);
     }
 

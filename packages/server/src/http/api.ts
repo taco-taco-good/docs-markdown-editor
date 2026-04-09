@@ -6,6 +6,7 @@ import { DocumentService } from "../services/document.service.ts";
 import { RealtimeService } from "../services/realtime.service.ts";
 import { SearchService } from "../services/search.service.ts";
 import { TemplateService } from "../services/template.service.ts";
+import { VersioningService } from "../services/versioning.service.ts";
 import {
   type ApiContext,
   jsonResponse,
@@ -29,6 +30,7 @@ interface ApiServices {
   realtimeService?: RealtimeService;
   searchService?: SearchService;
   templateService?: TemplateService;
+  versioningService?: VersioningService;
 }
 
 export function createApiApp(options: ApiServices) {
@@ -36,8 +38,9 @@ export function createApiApp(options: ApiServices) {
   const authService = options.authService ?? new AuthService(options.workspaceRoot);
   const assetService = options.assetService ?? new AssetService(options.workspaceRoot);
   const templateService = options.templateService ?? new TemplateService(options.workspaceRoot);
+  const versioningService = options.versioningService ?? new VersioningService(options.workspaceRoot);
   const documentService =
-    options.documentService ?? new DocumentService(options.workspaceRoot, auditService, templateService);
+    options.documentService ?? new DocumentService(options.workspaceRoot, auditService, templateService, versioningService);
   const realtimeService = options.realtimeService ?? new RealtimeService();
   const searchService = options.searchService ?? new SearchService(options.workspaceRoot);
 
@@ -52,6 +55,7 @@ export function createApiApp(options: ApiServices) {
     realtimeService,
     searchService,
     templateService,
+    versioningService,
   };
 
   async function fetch(request: Request): Promise<Response> {

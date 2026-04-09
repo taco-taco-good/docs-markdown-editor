@@ -16,6 +16,8 @@ type WSEvent =
       type: "doc:content";
       path: string;
       content: string;
+      raw: string;
+      revision?: string;
       frontmatter: Frontmatter;
       originClientId: string | null;
     }
@@ -39,7 +41,10 @@ export function useWebSocket() {
         handleWSEvent(event);
 
         if (event.type === "doc:content" && event.path === currentPathRef.current) {
-          handleExternalUpdate(event.content, event.originClientId, event.frontmatter);
+          const raw = event.raw ?? event.content;
+          if (typeof raw === "string") {
+            handleExternalUpdate(raw, event.originClientId, event.frontmatter, event.revision);
+          }
         }
         if (event.type === "file:moved" || event.type === "dir:moved") {
           handleExternalMove(event.from, event.to);

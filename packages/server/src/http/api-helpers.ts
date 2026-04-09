@@ -10,6 +10,7 @@ import {
 import { RealtimeService } from "../services/realtime.service.ts";
 import { SearchService } from "../services/search.service.ts";
 import { TemplateService } from "../services/template.service.ts";
+import { VersioningService } from "../services/versioning.service.ts";
 
 // ── Types ──
 
@@ -40,6 +41,7 @@ export interface ApiContext {
   realtimeService: RealtimeService;
   searchService: SearchService;
   templateService: TemplateService;
+  versioningService?: VersioningService;
   watcherService?: { suppressNextChange(filePath: string): void };
 }
 
@@ -276,6 +278,8 @@ export function publishDocumentSnapshot(
     type: "doc:content",
     path,
     content: document.content,
+    raw: document.raw,
+    revision: document.revision,
     frontmatter: document.frontmatter,
     originClientId,
   });

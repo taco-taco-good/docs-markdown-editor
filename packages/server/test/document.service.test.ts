@@ -56,3 +56,35 @@ test("DocumentService explicit frontmatter update rewrites only on demand", () =
   assert.equal(result.changed, true);
   assert.match(readFileSync(absolutePath, "utf8"), /tags: \[one, two\]/);
 });
+
+test("DocumentService.writeRaw preserves exact raw markdown bytes for unsupported syntax", () => {
+  const workspace = createWorkspace();
+  const docPath = "guide/raw.md";
+  const absolutePath = path.join(workspace, docPath);
+  const raw = "# Unsupported\n\n[[WikiLink]]\n\n:::warning\nkeep me\n:::\n";
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, raw, "utf8");
+
+  const service = new DocumentService(workspace);
+  const nextRaw = raw.replace("keep me", "keep me exactly");
+  const result = service.writeRaw(docPath, nextRaw);
+
+  assert.equal(result.changed, true);
+  assert.equal(readFileSync(absolutePath, "utf8"), nextRaw);
+  assert.equal(result.raw, nextRaw);
+});
+
+test("DocumentService.writeRaw is a no-op when the raw markdown has not changed", () => {
+  const workspace = createWorkspace();
+  const docPath = "guide/raw-noop.md";
+  const absolutePath = path.join(workspace, docPath);
+  const raw = "# Same\n\nraw\n";
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, raw, "utf8");
+
+  const service = new DocumentService(workspace);
+  const result = service.writeRaw(docPath, raw);
+
+  assert.equal(result.changed, false);
+  assert.equal(readFileSync(absolutePath, "utf8"), raw);
+});

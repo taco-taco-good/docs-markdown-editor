@@ -8,6 +8,8 @@
     "dev:web": "bash ./deploy/scripts/dev-web.sh",
     "serve": "bash ./deploy/scripts/serve.sh",
     "user:create": "bash ./deploy/scripts/create-local-user.sh",
-    "test": "node --experimental-specifier-resolution=node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts"
+    "test": "node --experimental-specifier-resolution=node --test packages/shared/test/*.test.ts packages/server/test/*.test.ts packages/web/test/*.test.ts",
+    "test:mobile-editor-regression": "python scripts/playwright_mobile_editor_regression.py",
+    "test:editor-regression": "python scripts/playwright_regression_suite.py"
   }
 }

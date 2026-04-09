@@ -172,8 +172,8 @@ export class AuthService {
       .get(username) as { id: string; username: string; password_hash: string } | undefined;
 
     if (!row || !this.verifyPassword(row.password_hash, password)) {
-      this.throttle.recordFailure(throttleKey, now);
-      throw new Error("UNAUTHORIZED");
+      const backoffMs = this.throttle.recordFailure(throttleKey, now);
+      throw new Error(backoffMs > 0 ? "TOO_MANY_ATTEMPTS" : "UNAUTHORIZED");
     }
     this.throttle.clearFailure(throttleKey);
 

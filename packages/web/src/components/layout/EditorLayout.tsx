@@ -1,15 +1,9 @@
-import { useState } from "react";
 import { useDocumentStore } from "../../stores/document.store";
-import { useUIStore } from "../../stores/ui.store";
-import { MarkdownEditor } from "../editor/MarkdownEditor";
-import { RawEditor } from "../editor/RawEditor";
 import { EditorToolbar } from "../editor/EditorToolbar";
+import { MarkdownSourceEditor } from "../editor/MarkdownSourceEditor";
 
 export function EditorLayout() {
   const hasCurrentDoc = useDocumentStore((s) => s.currentDoc !== null);
-  const supportedInWysiwyg = useDocumentStore((s) => s.currentDoc?.supportedInWysiwyg ?? false);
-  const outlineOpen = useUIStore((s) => s.outlineOpen);
-  const [outlinePortalHost, setOutlinePortalHost] = useState<HTMLDivElement | null>(null);
   if (!hasCurrentDoc) {
     return <EmptyState />;
   }
@@ -23,18 +17,8 @@ export function EditorLayout() {
           data-editor-scroll-container="true"
           style={{ background: "var(--color-surface-0)" }}
         >
-          {supportedInWysiwyg ? (
-            <MarkdownEditor outlinePortalHost={outlinePortalHost} />
-          ) : (
-            <RawEditor />
-          )}
+          <MarkdownSourceEditor />
         </div>
-        <div
-          ref={setOutlinePortalHost}
-          className="docs-editor-outline-dock"
-          data-open={supportedInWysiwyg && outlineOpen ? "true" : "false"}
-          aria-hidden={supportedInWysiwyg && outlineOpen ? "false" : "true"}
-        />
       </div>
     </div>
   );

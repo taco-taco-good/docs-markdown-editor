@@ -22,17 +22,19 @@ export class LoginThrottle {
     }
   }
 
-  recordFailure(key: string, now: number): void {
+  recordFailure(key: string, now: number): number {
     const current = this.state.get(key);
     const failures = (current?.failures ?? 0) + 1;
     const backoffMs =
-      failures < 3 ? 0 : Math.min(15_000 * 2 ** (failures - 3), LOGIN_MAX_BACKOFF_MS);
+      failures <= 3 ? 0 : Math.min(15_000 * 2 ** (failures - 3), LOGIN_MAX_BACKOFF_MS);
 
     this.state.set(key, {
       failures,
       lockedUntil: now + backoffMs,
       lastFailureAt: now,
     });
+
+    return backoffMs;
   }
 
   clearFailure(key: string): void {

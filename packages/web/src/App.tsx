@@ -8,6 +8,7 @@ import { SettingsPage } from "./components/settings/SettingsPage";
 import { LoginPage } from "./components/auth/LoginPage";
 import { SetupPage } from "./components/auth/SetupPage";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { registerDocumentPersistenceLifecycle } from "./lib/document-lifecycle";
 import { useAuthStore } from "./stores/auth.store";
 import { useDocumentStore, getLastOpenedPath } from "./stores/document.store";
 import { useUIStore } from "./stores/ui.store";
@@ -65,6 +66,12 @@ function AuthenticatedApp() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  useEffect(() => registerDocumentPersistenceLifecycle({
+    document: window.document,
+    window,
+    store: useDocumentStore.getState(),
+  }), []);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 767px)").matches) {

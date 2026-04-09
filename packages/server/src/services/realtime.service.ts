@@ -15,6 +15,8 @@ export type WorkspaceEvent =
       type: "doc:content";
       path: string;
       content: string;
+      raw: string;
+      revision: string;
       frontmatter: Record<string, FrontmatterValue>;
       originClientId: string | null;
     }

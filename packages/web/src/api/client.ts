@@ -21,9 +21,8 @@ export interface DocumentMeta {
 
 export interface Document {
   meta: DocumentMeta;
-  content: string;
   raw: string;
-  supportedInWysiwyg: boolean;
+  content: string;
 }
 
 export interface TreeNode {
@@ -167,17 +166,19 @@ class ApiClient {
 
   async saveDocument(
     docPath: string,
-    content: string,
-    frontmatter?: Partial<Frontmatter>,
+    raw: string,
     baseRevision?: string,
+    requestOptions?: RequestInit,
   ): Promise<Document> {
     return this.request<Document>(`/api/docs/${encodeURIComponent(docPath)}`, {
+      ...requestOptions,
       method: "PATCH",
       headers: {
         "X-Client-Id": getEditorClientId(),
         ...(baseRevision ? { "X-Base-Revision": baseRevision } : {}),
+        ...requestOptions?.headers,
       },
-      body: JSON.stringify({ content, frontmatter }),
+      body: JSON.stringify({ raw }),
     });
   }
 

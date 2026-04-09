@@ -25,7 +25,7 @@ test("LoginThrottle blocks after three failures with exponential backoff", () =>
 
   const now = 100_000;
   for (let i = 0; i < 4; i++) {
-    throttle.recordFailure(k, now + i);
+    throttle.recordFailure(k, now);
   }
 
   // 4 failures → backoff = min(15_000 * 2^(4-3), 300_000) = 30_000ms
@@ -73,7 +73,7 @@ test("LoginThrottle caps backoff at 5 minutes", () => {
   const now = 100_000;
   // Record many failures to push backoff to maximum
   for (let i = 0; i < 20; i++) {
-    throttle.recordFailure(k, now + i);
+    throttle.recordFailure(k, now);
   }
 
   // Should still be blocked at now + 100_000 (less than 5 min = 300_000ms)

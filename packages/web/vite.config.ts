@@ -19,12 +19,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          tiptap: [
-            "@tiptap/core",
-            "@tiptap/react",
-            "@tiptap/starter-kit",
-            "@tiptap/extension-code-block-lowlight",
-          ],
           react: ["react", "react-dom"],
         },
       },

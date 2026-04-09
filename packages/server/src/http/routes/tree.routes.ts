@@ -36,6 +36,7 @@ export async function handleTreeRoutes(
     }
 
     const moved = moveWorkspaceEntry(ctx.workspaceRoot, body.from, targetPath, placement);
+    ctx.versioningService?.queueSnapshot(`docs: move ${moved.from} -> ${moved.to}`);
     ctx.searchService.buildIndex();
     if (moved.type === "file") {
       ctx.realtimeService.publish({ type: "file:moved", from: moved.from, to: moved.to });
@@ -44,6 +45,7 @@ export async function handleTreeRoutes(
         type: "doc:content",
         path: moved.to,
         content: movedDocument.content,
+        raw: movedDocument.raw,
         frontmatter: movedDocument.frontmatter,
         originClientId: null,
       });
@@ -61,6 +63,7 @@ export async function handleTreeRoutes(
       throw new Error("VALIDATION_ERROR");
     }
     const createdPath = createWorkspaceDirectory(ctx.workspaceRoot, body.path);
+    ctx.versioningService?.queueSnapshot(`docs: create directory ${createdPath}`);
     ctx.realtimeService.publish({ type: "dir:created", path: createdPath });
     ctx.realtimeService.publish({ type: "tree:changed" });
     return jsonResponse(201, { data: { path: createdPath } });
@@ -70,6 +73,7 @@ export async function handleTreeRoutes(
     const targetPath = decodeRoutePath(pathname, "/api/tree/dirs/");
     if (!targetPath) throw new Error("NOT_FOUND");
     const deleted = deleteWorkspaceEntry(ctx.workspaceRoot, targetPath);
+    ctx.versioningService?.queueSnapshot(`docs: delete ${deleted.path}`);
     ctx.realtimeService.publish({ type: deleted.type === "directory" ? "dir:deleted" : "file:deleted", path: deleted.path });
     ctx.realtimeService.publish({ type: "tree:changed" });
     return new Response(null, { status: 204 });

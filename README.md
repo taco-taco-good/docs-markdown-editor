@@ -138,6 +138,32 @@ https://your-domain.example/auth/oidc/callback
 
 API 서버와 Vite를 분리해서 실행:
 
+## 회귀 테스트
+
+기본 단위 테스트:
+
+```bash
+npm test
+```
+
+모바일 체크리스트 편집 회귀 테스트:
+
+```bash
+npm run test:mobile-editor-regression -- --base-url http://127.0.0.1:3001 --username <user> --password <pass>
+```
+
+이 스크립트는 모바일 viewport로 체크리스트 `Enter -> 입력 -> 삭제 -> 재입력` 시나리오를 반복 실행하고, 저장된 markdown 결과와 스크롤 점프를 함께 검사합니다.
+
+브라우저 기반 에디터 회귀 스위트:
+
+```bash
+npm run test:editor-regression -- --base-url http://127.0.0.1:3001 --username <user> --password <pass>
+```
+
+기본 `all` 케이스는 데스크탑 브라우저 기준으로 링크/표 렌더, 개요 이동, 구분선 렌더, 체크리스트 편집, 외부 링크 클릭, 멀티라인 삭제 후 에디터 생존 여부를 검사합니다.
+
+모바일 viewport 케이스가 필요하면 `mobile-draft-reload`, `mobile-checklist-edit`를 명시적으로 지정해 추가 실행할 수 있습니다.
+
 ```bash
 npm run dev
 ```

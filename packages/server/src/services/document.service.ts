@@ -13,6 +13,7 @@ import type { FrontmatterValue } from "../../../shared/src/frontmatter.ts";
 import { ensureParentDirectory, registerWorkspaceEntry, resolveWorkspacePath } from "../lib/workspace.ts";
 import { AuditService } from "./audit.service.ts";
 import { TemplateService } from "./template.service.ts";
+import { VersioningService } from "./versioning.service.ts";
 
 export interface ReadDocumentResult {
   path: string;
@@ -41,14 +42,24 @@ export class DocumentService {
   private readonly workspaceRoot: string;
   private readonly auditService?: AuditService;
   private readonly templateService: TemplateService;
+  private readonly versioningService?: VersioningService;
 
-  constructor(workspaceRoot: string, auditService?: AuditService, templateService?: TemplateService) {
+  constructor(
+    workspaceRoot: string,
+    auditService?: AuditService,
+    templateService?: TemplateService,
+    versioningService?: VersioningService,
+  ) {
     this.workspaceRoot = workspaceRoot;
     this.auditService = auditService;
     this.templateService = templateService ?? new TemplateService(workspaceRoot);
+    this.versioningService = versioningService;
   }
 
   private absolutePath(docPath: string): string {
+    if (docPath.split("/").some((segment) => segment === "..")) {
+      throw new Error("PATH_TRAVERSAL");
+    }
     if (!docPath.endsWith(".md")) {
       throw new Error("Document path must end with .md");
     }
@@ -90,10 +101,33 @@ export class DocumentService {
         provider: actor?.provider ?? "filesystem",
         action: "update",
       });
+      this.versioningService?.queueSnapshot(`docs: update ${docPath}`, this.absolutePath(docPath));
     }
 
     const result = this.read(docPath);
     return { ...result, changed: rawAfter !== rawBefore };
+  }
+
+  writeRaw(docPath: string, raw: string, actor?: DocumentActor): ReadDocumentResult {
+    const absolutePath = this.absolutePath(docPath);
+    if (!existsSync(absolutePath)) {
+      throw new Error("NOT_FOUND");
+    }
+
+    const rawBefore = readFileSync(absolutePath, "utf8");
+    if (rawBefore !== raw) {
+      writeFileSync(absolutePath, raw, "utf8");
+      this.auditService?.recordDocumentEdit({
+        path: docPath,
+        actorId: actor?.actorId ?? "system",
+        provider: actor?.provider ?? "filesystem",
+        action: "update",
+      });
+      this.versioningService?.queueSnapshot(`docs: update ${docPath}`, this.absolutePath(docPath));
+    }
+
+    const result = this.read(docPath);
+    return { ...result, changed: rawBefore !== raw };
   }
 
   create(docPath: string, options: CreateOptions = {}): ReadDocumentResult {
@@ -121,6 +155,7 @@ export class DocumentService {
       provider: options.provider ?? "filesystem",
       action: "create",
     });
+    this.versioningService?.queueSnapshot(`docs: create ${docPath}`, absolutePath);
     const result = this.read(docPath);
     return { ...result, changed: true };
   }
@@ -143,6 +178,7 @@ export class DocumentService {
         provider: actor?.provider ?? "filesystem",
         action: "update",
       });
+      this.versioningService?.queueSnapshot(`docs: update metadata ${docPath}`);
     }
 
     const result = this.read(docPath);
@@ -158,6 +194,7 @@ export class DocumentService {
       provider: actor?.provider ?? "filesystem",
       action: "delete",
     });
+    this.versioningService?.queueSnapshot(`docs: delete ${docPath}`);
   }
 
   exists(docPath: string): boolean {

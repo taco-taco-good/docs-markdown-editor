@@ -6,19 +6,14 @@ interface StatusState {
 }
 
 export interface RemoteSnapshot {
-  content: string;
-  frontmatter: string;
-  baseContent: string;
-  baseFrontmatter: string;
+  raw: string;
+  baseRaw: string;
 }
 
 interface RemoteUpdateParams extends StatusState {
-  content: string;
-  frontmatter: string;
-  currentContent: string;
-  currentFrontmatter: string;
-  lastSavedContent: string;
-  lastSavedFrontmatter: string;
+  raw: string;
+  currentRaw: string;
+  lastSavedRaw: string;
   isComposing: boolean;
   originClientId?: string | null;
   editorClientId: string;
@@ -26,7 +21,7 @@ interface RemoteUpdateParams extends StatusState {
 
 interface SaveSuccessParams extends StatusState {
   hasNewerLocalEdits: boolean;
-  requestedContent: string;
+  requestedRaw: string;
 }
 
 export function deriveSaveStatus(state: StatusState): SaveStatus {
@@ -37,41 +32,35 @@ export function deriveSaveStatus(state: StatusState): SaveStatus {
 export function resolveRemoteUpdate(params: RemoteUpdateParams):
   | { action: "ignore" }
   | { action: "queue"; snapshot: RemoteSnapshot }
-  | { action: "apply"; content: string; frontmatter: string; saveStatus: SaveStatus } {
+  | { action: "apply"; raw: string; saveStatus: SaveStatus } {
   if (params.originClientId === params.editorClientId) {
     return { action: "ignore" };
   }
-  if (
-    params.content === params.currentContent &&
-    params.frontmatter === params.currentFrontmatter
-  ) {
+  if (params.raw === params.currentRaw) {
     return { action: "ignore" };
   }
   if (params.isDirty || params.isComposing) {
     return {
       action: "queue",
       snapshot: {
-        content: params.content,
-        frontmatter: params.frontmatter,
-        baseContent: params.lastSavedContent,
-        baseFrontmatter: params.lastSavedFrontmatter,
+        raw: params.raw,
+        baseRaw: params.lastSavedRaw,
       },
     };
   }
   return {
     action: "apply",
-    content: params.content,
-    frontmatter: params.frontmatter,
+    raw: params.raw,
     saveStatus: "saved",
   };
 }
 
 export function resolveSaveSuccess(params: SaveSuccessParams): {
-  lastSavedContent: string;
+  lastSavedRaw: string;
   saveStatus: SaveStatus;
 } {
   return {
-    lastSavedContent: params.requestedContent,
+    lastSavedRaw: params.requestedRaw,
     saveStatus: params.hasNewerLocalEdits
       ? deriveSaveStatus({ hasPendingRemoteUpdate: params.hasPendingRemoteUpdate, isDirty: true })
       : deriveSaveStatus({ hasPendingRemoteUpdate: params.hasPendingRemoteUpdate, isDirty: false }),
@@ -135,34 +124,34 @@ function applyLineChange(base: string[], change: LineChange): string[] {
   ];
 }
 
-export function mergeConcurrentContent(params: {
+export function mergeConcurrentMarkdown(params: {
   base: string;
   local: string;
   remote: string;
 }): {
-  content: string;
+  raw: string;
   hadRemoteChanges: boolean;
   droppedRemoteChanges: boolean;
 } {
   const { base, local, remote } = params;
 
   if (local === remote) {
-    return { content: local, hadRemoteChanges: false, droppedRemoteChanges: false };
+    return { raw: local, hadRemoteChanges: false, droppedRemoteChanges: false };
   }
   if (local === base) {
-    return { content: remote, hadRemoteChanges: true, droppedRemoteChanges: false };
+    return { raw: remote, hadRemoteChanges: true, droppedRemoteChanges: false };
   }
   if (remote === base) {
-    return { content: local, hadRemoteChanges: false, droppedRemoteChanges: false };
+    return { raw: local, hadRemoteChanges: false, droppedRemoteChanges: false };
   }
 
   const localChange = computeLineChange(base, local);
   const remoteChange = computeLineChange(base, remote);
   if (!localChange) {
-    return { content: remote, hadRemoteChanges: true, droppedRemoteChanges: false };
+    return { raw: remote, hadRemoteChanges: true, droppedRemoteChanges: false };
   }
   if (!remoteChange) {
-    return { content: local, hadRemoteChanges: false, droppedRemoteChanges: false };
+    return { raw: local, hadRemoteChanges: false, droppedRemoteChanges: false };
   }
 
   const changesOverlap =
@@ -173,90 +162,15 @@ export function mergeConcurrentContent(params: {
     localChange.start === remoteChange.start;
 
   if (changesOverlap || touchesSameInsertionPoint) {
-    return { content: local, hadRemoteChanges: true, droppedRemoteChanges: true };
+    return { raw: local, hadRemoteChanges: true, droppedRemoteChanges: true };
   }
 
   const baseLines = splitLines(base);
   const ordered = [localChange, remoteChange].sort((left, right) => right.start - left.start);
   const mergedLines = ordered.reduce((acc, change) => applyLineChange(acc, change), baseLines);
   return {
-    content: mergedLines.join(""),
+    raw: mergedLines.join(""),
     hadRemoteChanges: true,
     droppedRemoteChanges: false,
-  };
-}
-
-export function mergeConcurrentFrontmatter(params: {
-  base: string;
-  local: string;
-  remote: string;
-}): {
-  frontmatter: string;
-  hadRemoteChanges: boolean;
-  droppedRemoteChanges: boolean;
-} {
-  const { base, local, remote } = params;
-
-  if (local === remote) {
-    return { frontmatter: local, hadRemoteChanges: false, droppedRemoteChanges: false };
-  }
-  if (local === base) {
-    return { frontmatter: remote, hadRemoteChanges: true, droppedRemoteChanges: false };
-  }
-  if (remote === base) {
-    return { frontmatter: local, hadRemoteChanges: false, droppedRemoteChanges: false };
-  }
-
-  const baseObject = JSON.parse(base) as Record<string, unknown>;
-  const localObject = JSON.parse(local) as Record<string, unknown>;
-  const remoteObject = JSON.parse(remote) as Record<string, unknown>;
-  const merged: Record<string, unknown> = { ...baseObject };
-  let hadRemoteChanges = false;
-  let droppedRemoteChanges = false;
-
-  const keys = new Set([
-    ...Object.keys(baseObject),
-    ...Object.keys(localObject),
-    ...Object.keys(remoteObject),
-  ]);
-
-  for (const key of keys) {
-    const baseValue = baseObject[key];
-    const localValue = localObject[key];
-    const remoteValue = remoteObject[key];
-    const localChanged = JSON.stringify(localValue) !== JSON.stringify(baseValue);
-    const remoteChanged = JSON.stringify(remoteValue) !== JSON.stringify(baseValue);
-
-    if (localChanged && remoteChanged) {
-      if (JSON.stringify(localValue) === JSON.stringify(remoteValue)) {
-        merged[key] = localValue;
-      } else {
-        merged[key] = localValue;
-        hadRemoteChanges = true;
-        droppedRemoteChanges = true;
-      }
-      continue;
-    }
-
-    if (localChanged) {
-      merged[key] = localValue;
-      continue;
-    }
-
-    if (remoteChanged) {
-      merged[key] = remoteValue;
-      hadRemoteChanges = true;
-      continue;
-    }
-
-    if (key in baseObject) {
-      merged[key] = baseValue;
-    }
-  }
-
-  return {
-    frontmatter: JSON.stringify(merged),
-    hadRemoteChanges,
-    droppedRemoteChanges,
   };
 }

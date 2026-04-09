@@ -50,3 +50,35 @@ test("WatcherService detects new directories and markdown files", () => {
     { type: "file:created", path: "notes/today.md" },
   ]);
 });
+
+test("WatcherService publishes raw markdown in doc:content payloads for updated files", () => {
+  const workspace = createWorkspace();
+  mkdirSync(path.join(workspace, "guide"), { recursive: true });
+  const docPath = path.join(workspace, "guide", "intro.md");
+  writeFileSync(docPath, "# Intro\n\nfirst\n", "utf8");
+
+  const published: Array<{ type: string; raw?: string; path?: string }> = [];
+  const realtime = new RealtimeService();
+  const originalPublish = realtime.publish.bind(realtime);
+  realtime.publish = ((event) => {
+    published.push(event as { type: string; raw?: string; path?: string });
+    originalPublish(event);
+  }) as typeof realtime.publish;
+
+  const watcher = new WatcherService({
+    workspaceRoot: workspace,
+    documentService: new DocumentService(workspace),
+    realtimeService: realtime,
+    searchService: new SearchService(workspace),
+  });
+
+  writeFileSync(docPath, "# Intro\n\nupdated\n", "utf8");
+  watcher.refresh();
+
+  assert.ok(
+    published.some((event) =>
+      event.type === "doc:content" &&
+      event.path === "guide/intro.md" &&
+      event.raw === "# Intro\n\nupdated\n"),
+  );
+});
