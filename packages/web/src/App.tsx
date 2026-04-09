@@ -11,6 +11,7 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import { registerDocumentPersistenceLifecycle } from "./lib/document-lifecycle";
 import { useAuthStore } from "./stores/auth.store";
 import { useDocumentStore, getLastOpenedPath } from "./stores/document.store";
+import { useTabStore } from "./stores/tab.store.js";
 import { useUIStore } from "./stores/ui.store";
 
 export function App() {
@@ -61,6 +62,38 @@ function AuthenticatedApp() {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         useDocumentStore.getState().saveDocument();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        const store = useDocumentStore.getState();
+        if (store.isDirty && !window.confirm("저장하지 않은 변경 사항이 있습니다. 탭을 닫을까요?")) {
+          return;
+        }
+        void store.closeDocument(undefined, { force: true });
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "[") {
+        e.preventDefault();
+        const tabState = useTabStore.getState();
+        const currentIndex = tabState.openTabs.findIndex((tab) => tab.path === tabState.activeTabPath);
+        const target = currentIndex > 0 ? tabState.openTabs[currentIndex - 1] : null;
+        if (target) {
+          void useDocumentStore.getState().openDocument(target.path);
+        }
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "]") {
+        e.preventDefault();
+        const tabState = useTabStore.getState();
+        const currentIndex = tabState.openTabs.findIndex((tab) => tab.path === tabState.activeTabPath);
+        const target = currentIndex >= 0 ? tabState.openTabs[currentIndex + 1] ?? null : null;
+        if (target) {
+          void useDocumentStore.getState().openDocument(target.path);
+        }
       }
     };
     window.addEventListener("keydown", handler);
@@ -81,6 +114,14 @@ function AuthenticatedApp() {
 
   // Restore last opened document
   useEffect(() => {
+    const tabStore = useTabStore.getState();
+    tabStore.hydrate();
+    const activeTabPath = tabStore.activeTabPath;
+    if (activeTabPath && !useDocumentStore.getState().currentPath) {
+      useDocumentStore.getState().openDocument(activeTabPath);
+      return;
+    }
+
     const lastPath = getLastOpenedPath();
     if (lastPath && !useDocumentStore.getState().currentPath) {
       useDocumentStore.getState().openDocument(lastPath);

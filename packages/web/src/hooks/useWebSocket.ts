@@ -25,11 +25,10 @@ type WSEvent =
 
 export function useWebSocket() {
   const streamRef = useRef<EventSource | null>(null);
-  const currentPathRef = useRef<string | null>(null);
   const handleWSEvent = useTreeStore((s) => s.handleWSEvent);
-  const currentPath = useDocumentStore((s) => s.currentPath);
   const handleExternalUpdate = useDocumentStore((s) => s.handleExternalUpdate);
   const handleExternalMove = useDocumentStore((s) => s.handleExternalMove);
+  const hasSession = useDocumentStore((s) => s.hasSession);
 
   const connect = useCallback(() => {
     const stream = new EventSource("/api/events", { withCredentials: true });
@@ -40,10 +39,10 @@ export function useWebSocket() {
         const event: WSEvent = JSON.parse(ev.data);
         handleWSEvent(event);
 
-        if (event.type === "doc:content" && event.path === currentPathRef.current) {
+        if (event.type === "doc:content" && hasSession(event.path)) {
           const raw = event.raw ?? event.content;
           if (typeof raw === "string") {
-            handleExternalUpdate(raw, event.originClientId, event.frontmatter, event.revision);
+            handleExternalUpdate(event.path, raw, event.originClientId, event.frontmatter, event.revision);
           }
         }
         if (event.type === "file:moved" || event.type === "dir:moved") {
@@ -53,11 +52,7 @@ export function useWebSocket() {
         // ignore malformed messages
       }
     };
-  }, [handleWSEvent, handleExternalMove, handleExternalUpdate]);
-
-  useEffect(() => {
-    currentPathRef.current = currentPath;
-  }, [currentPath]);
+  }, [handleWSEvent, handleExternalMove, handleExternalUpdate, hasSession]);
 
   useEffect(() => {
     connect();

@@ -8,6 +8,7 @@ import {
 } from "../lib/document-draft.js";
 import { remapMovedPath } from "../lib/path-utils.js";
 import { getEditorClientId } from "../lib/editor-client.js";
+import { resetTabStoreForTests, useTabStore } from "./tab.store.js";
 import {
   deriveSaveStatus,
   mergeConcurrentMarkdown,
@@ -20,6 +21,33 @@ import {
 } from "./document-sync.js";
 
 const LAST_PATH_KEY = "docs-md-last-path";
+
+export interface EditorSelectionSnapshot {
+  from: number;
+  to: number;
+  head: number;
+}
+
+export interface DocumentSession {
+  path: string;
+  doc: Document;
+  lastSavedRaw: string;
+  isDirty: boolean;
+  saveStatus: SaveStatus;
+  hasPendingRemoteUpdate: boolean;
+  pendingRemoteSnapshot: RemoteSnapshot | null;
+  isComposing: boolean;
+  selection: EditorSelectionSnapshot | null;
+  scrollTop: number;
+}
+
+interface SaveCoordinator {
+  timeout: ReturnType<typeof setTimeout> | null;
+  editRevision: number;
+  activeSaveRequest: number;
+  activeSavePromise: Promise<void> | null;
+  queuedSaveOptions: { keepalive?: boolean } | null;
+}
 
 export function getLastOpenedPath(): string | null {
   try {
@@ -50,22 +78,29 @@ interface DocumentStore {
   hasPendingRemoteUpdate: boolean;
   pendingRemoteSnapshot: RemoteSnapshot | null;
   isComposing: boolean;
+  currentSelection: EditorSelectionSnapshot | null;
+  currentScrollTop: number;
+  sessionsByPath: Record<string, DocumentSession>;
 
   openDocument: (path: string) => Promise<void>;
   reloadCurrentDocument: () => Promise<void>;
-  closeDocument: () => void;
+  closeDocument: (path?: string, options?: { force?: boolean }) => Promise<void>;
+  closeDocuments: (paths: string[], options?: { force?: boolean; nextPath?: string | null }) => Promise<void>;
   updateRaw: (raw: string) => void;
-  saveDocument: (options?: { keepalive?: boolean }) => Promise<void>;
+  saveDocument: (options?: { keepalive?: boolean }, targetPath?: string) => Promise<void>;
   flushPendingSave: (options?: { keepalive?: boolean }) => Promise<void>;
   beginComposition: () => void;
   endComposition: () => void;
+  updateEditorViewport: (snapshot: { selection?: EditorSelectionSnapshot | null; scrollTop?: number }) => void;
   handleExternalUpdate: (
+    path: string,
     raw: string,
     originClientId?: string | null,
     frontmatter?: Frontmatter | null,
     revision?: string,
   ) => void;
   handleExternalMove: (from: string, to: string) => void;
+  hasSession: (path: string) => boolean;
 }
 
 interface StoreSnapshot {
@@ -77,33 +112,45 @@ interface StoreSnapshot {
   hasPendingRemoteUpdate: boolean;
   pendingRemoteSnapshot: RemoteSnapshot | null;
   isComposing: boolean;
+  currentSelection: EditorSelectionSnapshot | null;
+  currentScrollTop: number;
+  sessionsByPath: Record<string, DocumentSession>;
 }
 
 const EDITOR_CLIENT_ID = getEditorClientId();
+const coordinatorsByPath = new Map<string, SaveCoordinator>();
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-let editRevision = 0;
-let activeSaveRequest = 0;
-let activeSavePromise: Promise<void> | null = null;
-let queuedSaveOptions: { keepalive?: boolean } | null = null;
-
-function createInitialState(): StoreSnapshot {
+function createCoordinator(): SaveCoordinator {
   return {
-    currentPath: null,
-    currentDoc: null,
-    isDirty: false,
-    saveStatus: "idle",
-    lastSavedRaw: "",
-    hasPendingRemoteUpdate: false,
-    pendingRemoteSnapshot: null,
-    isComposing: false,
+    timeout: null,
+    editRevision: 0,
+    activeSaveRequest: 0,
+    activeSavePromise: null,
+    queuedSaveOptions: null,
   };
 }
 
-function clearScheduledSave() {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-    saveTimeout = null;
+function getCoordinator(path: string): SaveCoordinator {
+  const existing = coordinatorsByPath.get(path);
+  if (existing) return existing;
+  const next = createCoordinator();
+  coordinatorsByPath.set(path, next);
+  return next;
+}
+
+function clearScheduledSave(path: string): void {
+  const coordinator = coordinatorsByPath.get(path);
+  if (!coordinator?.timeout) return;
+  clearTimeout(coordinator.timeout);
+  coordinator.timeout = null;
+}
+
+function clearAllScheduledSaves(): void {
+  for (const coordinator of coordinatorsByPath.values()) {
+    if (coordinator.timeout) {
+      clearTimeout(coordinator.timeout);
+      coordinator.timeout = null;
+    }
   }
 }
 
@@ -117,24 +164,30 @@ function mergeSaveOptions(
   };
 }
 
-function resetSaveCoordinator() {
-  activeSaveRequest = 0;
-  activeSavePromise = null;
-  queuedSaveOptions = null;
+function resetSaveCoordinator(path: string): void {
+  clearScheduledSave(path);
+  coordinatorsByPath.delete(path);
 }
 
-function scheduleSave(delayMs = 300) {
-  clearScheduledSave();
-  saveTimeout = setTimeout(() => {
-    const state = useDocumentStore.getState();
-    if (state.isComposing) {
-      scheduleSave(150);
-      return;
-    }
-    if (state.isDirty) {
-      void state.saveDocument();
-    }
-  }, delayMs);
+function resetAllSaveCoordinators(): void {
+  clearAllScheduledSaves();
+  coordinatorsByPath.clear();
+}
+
+function createInitialState(): StoreSnapshot {
+  return {
+    currentPath: null,
+    currentDoc: null,
+    isDirty: false,
+    saveStatus: "idle",
+    lastSavedRaw: "",
+    hasPendingRemoteUpdate: false,
+    pendingRemoteSnapshot: null,
+    isComposing: false,
+    currentSelection: null,
+    currentScrollTop: 0,
+    sessionsByPath: {},
+  };
 }
 
 function replaceCurrentDocRaw(doc: Document, raw: string, frontmatter?: Frontmatter | null, revision?: string): Document {
@@ -166,26 +219,135 @@ function getVersionMismatchDocument(error: unknown): Document | null {
   return (details as { document?: Document }).document ?? null;
 }
 
-function persistDraftForState(state: Pick<StoreSnapshot, "currentPath" | "currentDoc" | "lastSavedRaw">): void {
-  if (!state.currentPath || !state.currentDoc) return;
-  writeDocumentDraft(state.currentPath, {
-    raw: state.currentDoc.raw,
-    lastSavedRaw: state.lastSavedRaw,
-    baseRevision: state.currentDoc.meta.revision,
+function sessionFromState(state: StoreSnapshot, path?: string): DocumentSession | null {
+  const targetPath = path ?? state.currentPath;
+  if (!targetPath) return null;
+  if (state.currentPath === targetPath && state.currentDoc) {
+    return {
+      path: targetPath,
+      doc: {
+        ...state.currentDoc,
+        raw: state.currentDoc.raw,
+        content: state.currentDoc.raw,
+      },
+      lastSavedRaw: state.lastSavedRaw,
+      isDirty: state.isDirty,
+      saveStatus: state.saveStatus,
+      hasPendingRemoteUpdate: state.hasPendingRemoteUpdate,
+      pendingRemoteSnapshot: state.pendingRemoteSnapshot,
+      isComposing: state.isComposing,
+      selection: state.currentSelection,
+      scrollTop: state.currentScrollTop,
+    };
+  }
+  return state.sessionsByPath[targetPath] ?? null;
+}
+
+function withPersistedCurrentSession(state: StoreSnapshot): StoreSnapshot {
+  if (!state.currentPath || !state.currentDoc) return state;
+  const session = sessionFromState(state, state.currentPath);
+  if (!session) return state;
+  return {
+    ...state,
+    sessionsByPath: {
+      ...state.sessionsByPath,
+      [state.currentPath]: session,
+    },
+  };
+}
+
+function setCurrentFromSession(state: StoreSnapshot, path: string, session: DocumentSession): StoreSnapshot {
+  return {
+    ...state,
+    currentPath: path,
+    currentDoc: {
+      ...session.doc,
+      content: session.doc.raw,
+    },
+    isDirty: session.isDirty,
+    saveStatus: session.saveStatus,
+    lastSavedRaw: session.lastSavedRaw,
+    hasPendingRemoteUpdate: session.hasPendingRemoteUpdate,
+    pendingRemoteSnapshot: session.pendingRemoteSnapshot,
+    isComposing: session.isComposing,
+    currentSelection: session.selection,
+    currentScrollTop: session.scrollTop,
+    sessionsByPath: {
+      ...state.sessionsByPath,
+      [path]: session,
+    },
+  };
+}
+
+function applySessionUpdate(
+  state: StoreSnapshot,
+  path: string,
+  updater: (session: DocumentSession) => DocumentSession,
+): StoreSnapshot {
+  const session = sessionFromState(state, path);
+  if (!session) return state;
+  const nextSession = updater(session);
+  const nextState = {
+    ...state,
+    sessionsByPath: {
+      ...state.sessionsByPath,
+      [path]: nextSession,
+    },
+  };
+  if (state.currentPath !== path) {
+    return nextState;
+  }
+  return setCurrentFromSession(nextState, path, nextSession);
+}
+
+function persistDraftForSession(session: DocumentSession): void {
+  writeDocumentDraft(session.path, {
+    raw: session.doc.raw,
+    lastSavedRaw: session.lastSavedRaw,
+    baseRevision: session.doc.meta.revision,
   });
+}
+
+function scheduleSave(path: string, delayMs = 300): void {
+  const coordinator = getCoordinator(path);
+  clearScheduledSave(path);
+  coordinator.timeout = setTimeout(() => {
+    coordinator.timeout = null;
+    const state = useDocumentStore.getState();
+    const session = sessionFromState(state, path);
+    if (!session) return;
+    if (session.isComposing) {
+      scheduleSave(path, 150);
+      return;
+    }
+    if (session.isDirty || session.hasPendingRemoteUpdate) {
+      void state.saveDocument(undefined, path);
+    }
+  }, delayMs);
+}
+
+function syncCurrentSessionTitle(path: string, doc: Document): void {
+  const title = doc.meta.title || doc.meta.path.split("/").pop() || doc.meta.path;
+  useTabStore.getState().updateTabTitle(path, title);
 }
 
 export const useDocumentStore = create<DocumentStore>((set, get) => ({
   ...createInitialState(),
 
   openDocument: async (path) => {
-    clearScheduledSave();
-    editRevision = 0;
-    resetSaveCoordinator();
+    const currentState = get();
+    const persistedState = withPersistedCurrentSession(currentState);
+    if (persistedState !== currentState) {
+      set(persistedState);
+    }
 
-    const state = get();
-    if (state.isDirty && state.currentPath) {
-      await get().saveDocument();
+    useTabStore.getState().openTab(path, path.split("/").pop());
+
+    const existingSession = sessionFromState(get(), path);
+    if (existingSession) {
+      saveLastOpenedPath(path);
+      set((state) => setCurrentFromSession(withPersistedCurrentSession(state), path, existingSession));
+      return;
     }
 
     try {
@@ -193,24 +355,29 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       const draft = readDocumentDraft(path);
       const shouldRestoreDraft = draft ? shouldRestoreDocumentDraft(doc, draft) : false;
       const restoredRaw = shouldRestoreDraft && draft ? draft.raw : doc.raw;
-
-      saveLastOpenedPath(path);
-      set({
-        currentPath: path,
-        currentDoc: {
+      const session: DocumentSession = {
+        path,
+        doc: {
           ...doc,
           raw: restoredRaw,
           content: restoredRaw,
         },
+        lastSavedRaw: doc.raw,
         isDirty: shouldRestoreDraft,
         saveStatus: shouldRestoreDraft ? "idle" : "saved",
-        lastSavedRaw: doc.raw,
         hasPendingRemoteUpdate: false,
         pendingRemoteSnapshot: null,
         isComposing: false,
-      });
+        selection: null,
+        scrollTop: 0,
+      };
+
+      saveLastOpenedPath(path);
+      syncCurrentSessionTitle(path, session.doc);
+      set((state) => setCurrentFromSession(withPersistedCurrentSession(state), path, session));
       if (shouldRestoreDraft) {
-        scheduleSave(100);
+        persistDraftForSession(session);
+        scheduleSave(path, 100);
       } else {
         clearDocumentDraft(path);
       }
@@ -222,284 +389,446 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   reloadCurrentDocument: async () => {
     const state = get();
     if (!state.currentPath) return;
+    const path = state.currentPath;
 
-    clearScheduledSave();
+    clearScheduledSave(path);
 
     try {
-      const doc = await api.getDocument(state.currentPath);
-      set({
-        currentDoc: {
+      const doc = await api.getDocument(path);
+      const session: DocumentSession = {
+        path,
+        doc: {
           ...doc,
           content: doc.raw,
         },
+        lastSavedRaw: doc.raw,
         isDirty: false,
         saveStatus: "saved",
-        lastSavedRaw: doc.raw,
         hasPendingRemoteUpdate: false,
         pendingRemoteSnapshot: null,
         isComposing: false,
-      });
-      editRevision = 0;
-      resetSaveCoordinator();
+        selection: state.currentSelection,
+        scrollTop: state.currentScrollTop,
+      };
+      resetSaveCoordinator(path);
+      syncCurrentSessionTitle(path, session.doc);
+      set((current) => setCurrentFromSession(withPersistedCurrentSession(current), path, session));
+      clearDocumentDraft(path);
     } catch (error) {
       console.error("Failed to reload document:", error);
-      set({ saveStatus: "conflict" });
+      set((current) => applySessionUpdate(current, path, (session) => ({
+        ...session,
+        saveStatus: "conflict",
+      })));
     }
   },
 
-  closeDocument: () => {
-    clearScheduledSave();
-    editRevision = 0;
-    resetSaveCoordinator();
-    set(createInitialState());
+  closeDocument: async (path, options) => {
+    const targetPath = path ?? get().currentPath;
+    if (!targetPath) return;
+    await get().closeDocuments([targetPath], { force: options?.force });
+  },
+
+  closeDocuments: async (paths, options) => {
+    const uniquePaths = [...new Set(paths)].filter(Boolean);
+    if (uniquePaths.length === 0) return;
+
+    const state = get();
+    const persisted = withPersistedCurrentSession(state);
+    const activePath = persisted.currentPath;
+    const targetSessions = uniquePaths
+      .map((path) => sessionFromState(persisted, path))
+      .filter((session): session is DocumentSession => Boolean(session));
+
+    if (targetSessions.length === 0) return;
+    if (!options?.force && targetSessions.some((session) => session.isDirty)) {
+      return;
+    }
+
+    const closeSet = new Set(targetSessions.map((session) => session.path));
+    const tabState = useTabStore.getState();
+    const fallbackNextPath = activePath && closeSet.has(activePath)
+      ? tabState.getNextPathAfterClose(activePath)
+      : activePath;
+    const preferredNextPath = options?.nextPath ?? fallbackNextPath ?? null;
+
+    for (const session of targetSessions) {
+      clearScheduledSave(session.path);
+      resetSaveCoordinator(session.path);
+      clearDocumentDraft(session.path);
+    }
+
+    const remainingSessions = { ...persisted.sessionsByPath };
+    for (const session of targetSessions) {
+      delete remainingSessions[session.path];
+    }
+
+    useTabStore.getState().closeTabs(
+      targetSessions.map((session) => session.path),
+      preferredNextPath,
+    );
+
+    const nextActivePath = useTabStore.getState().activeTabPath;
+    const nextActiveSession = nextActivePath ? remainingSessions[nextActivePath] ?? null : null;
+
+    set((current) => {
+      const currentPersisted = withPersistedCurrentSession(current);
+      const sessionsByPath = { ...currentPersisted.sessionsByPath };
+      for (const session of targetSessions) {
+        delete sessionsByPath[session.path];
+      }
+
+      if (nextActivePath && sessionsByPath[nextActivePath]) {
+        return setCurrentFromSession(
+          {
+            ...currentPersisted,
+            sessionsByPath,
+          },
+          nextActivePath,
+          sessionsByPath[nextActivePath],
+        );
+      }
+
+      return {
+        ...currentPersisted,
+        currentPath: null,
+        currentDoc: null,
+        isDirty: false,
+        saveStatus: "idle",
+        lastSavedRaw: "",
+        hasPendingRemoteUpdate: false,
+        pendingRemoteSnapshot: null,
+        isComposing: false,
+        currentSelection: null,
+        currentScrollTop: 0,
+        sessionsByPath,
+      };
+    });
+
+    if (nextActivePath && !nextActiveSession) {
+      await get().openDocument(nextActivePath);
+      return;
+    }
+
+    saveLastOpenedPath(nextActivePath ?? null);
   },
 
   updateRaw: (raw) => {
     const state = get();
-    if (!state.currentDoc) return;
+    if (!state.currentPath || !state.currentDoc) return;
+    const path = state.currentPath;
+    const coordinator = getCoordinator(path);
+    coordinator.editRevision += 1;
 
-    editRevision += 1;
-    set({
-      currentDoc: replaceCurrentDocRaw(state.currentDoc, raw),
-      isDirty: raw !== state.lastSavedRaw,
-      saveStatus: raw !== state.lastSavedRaw ? "idle" : "saved",
+    set((current) => {
+      if (!current.currentPath || !current.currentDoc) return current;
+      const nextState: StoreSnapshot = {
+        ...current,
+        currentDoc: replaceCurrentDocRaw(current.currentDoc, raw),
+        isDirty: raw !== current.lastSavedRaw,
+        saveStatus: raw !== current.lastSavedRaw ? "idle" : "saved",
+      };
+      return withPersistedCurrentSession(nextState);
     });
-    const nextState = get();
-    if (raw !== nextState.lastSavedRaw) {
-      persistDraftForState(nextState);
-    } else if (nextState.currentPath) {
-      clearDocumentDraft(nextState.currentPath);
+
+    const updatedSession = sessionFromState(get(), path);
+    if (!updatedSession) return;
+    if (updatedSession.doc.raw !== updatedSession.lastSavedRaw) {
+      persistDraftForSession(updatedSession);
+    } else {
+      clearDocumentDraft(path);
     }
 
-    scheduleSave();
+    scheduleSave(path);
   },
 
   flushPendingSave: async (options) => {
-    clearScheduledSave();
-    await get().saveDocument(options);
+    const path = get().currentPath;
+    if (!path) return;
+    clearScheduledSave(path);
+    await get().saveDocument(options, path);
   },
 
-  saveDocument: async (options) => {
-    if (activeSavePromise) {
-      queuedSaveOptions = mergeSaveOptions(queuedSaveOptions, options);
-      return activeSavePromise;
+  saveDocument: async (options, targetPath) => {
+    const path = targetPath ?? get().currentPath;
+    if (!path) return;
+
+    const coordinator = getCoordinator(path);
+    if (coordinator.activeSavePromise) {
+      coordinator.queuedSaveOptions = mergeSaveOptions(coordinator.queuedSaveOptions, options);
+      return coordinator.activeSavePromise;
     }
 
     const runSave = async () => {
-    const state = get();
-    if (!state.currentPath || !state.currentDoc) return;
-    const contentChanged = state.currentDoc.raw !== state.lastSavedRaw;
+      const state = get();
+      const session = sessionFromState(state, path);
+      if (!session) return;
+      const contentChanged = session.doc.raw !== session.lastSavedRaw;
 
-    if (!contentChanged) {
-      if (state.pendingRemoteSnapshot && state.currentDoc) {
-        const merged = mergeConcurrentMarkdown({
-          base: state.pendingRemoteSnapshot.baseRaw,
-          local: state.currentDoc.raw,
-          remote: state.pendingRemoteSnapshot.raw,
-        });
+      if (!contentChanged) {
+        if (session.pendingRemoteSnapshot) {
+          const merged = mergeConcurrentMarkdown({
+            base: session.pendingRemoteSnapshot.baseRaw,
+            local: session.doc.raw,
+            remote: session.pendingRemoteSnapshot.raw,
+          });
 
-        if (merged.raw !== state.currentDoc.raw) {
-          editRevision += 1;
-          set((current) => ({
-            currentDoc: current.currentDoc ? replaceCurrentDocRaw(current.currentDoc, merged.raw) : null,
-            isDirty: true,
-            saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
+          if (merged.raw !== session.doc.raw) {
+            coordinator.editRevision += 1;
+            set((current) => applySessionUpdate(current, path, (currentSession) => ({
+              ...currentSession,
+              doc: replaceCurrentDocRaw(currentSession.doc, merged.raw),
+              isDirty: true,
+              saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
+              hasPendingRemoteUpdate: false,
+              pendingRemoteSnapshot: null,
+            })));
+            const nextSession = sessionFromState(get(), path);
+            if (nextSession) {
+              persistDraftForSession(nextSession);
+            }
+            scheduleSave(path, 80);
+            return;
+          }
+
+          set((current) => applySessionUpdate(current, path, (currentSession) => ({
+            ...currentSession,
             hasPendingRemoteUpdate: false,
             pendingRemoteSnapshot: null,
-          }));
-          scheduleSave(80);
+            saveStatus: merged.droppedRemoteChanges
+              ? "conflict"
+              : deriveSaveStatus({ hasPendingRemoteUpdate: false, isDirty: currentSession.isDirty }),
+          })));
+          return;
+        }
+        if (session.hasPendingRemoteUpdate && path === get().currentPath) {
+          void get().reloadCurrentDocument();
+        }
+        return;
+      }
+
+      const requestedRaw = session.doc.raw;
+      const requestedRevision = coordinator.editRevision;
+      const requestId = ++coordinator.activeSaveRequest;
+
+      set((current) => applySessionUpdate(current, path, (currentSession) => ({
+        ...currentSession,
+        saveStatus: "saving",
+      })));
+
+      try {
+        const doc = await api.saveDocument(
+          path,
+          requestedRaw,
+          session.doc.meta.revision,
+          options?.keepalive ? { keepalive: true } : undefined,
+        );
+
+        const latestState = get();
+        const latestSession = sessionFromState(latestState, path);
+        if (!latestSession) {
+          return;
+        }
+        if (!shouldApplySaveResponse({
+          currentPath: path,
+          requestedPath: path,
+          hasCurrentDoc: true,
+        })) {
           return;
         }
 
-        set({
-          hasPendingRemoteUpdate: false,
-          pendingRemoteSnapshot: null,
-          saveStatus: merged.droppedRemoteChanges
-            ? "conflict"
-            : deriveSaveStatus({ hasPendingRemoteUpdate: false, isDirty: state.isDirty }),
-        });
-        return;
-      }
-      if (state.hasPendingRemoteUpdate) {
-        void get().reloadCurrentDocument();
-      }
-      return;
-    }
+        const hasNewerLocalEdits =
+          coordinator.editRevision !== requestedRevision ||
+          latestSession.doc.raw !== requestedRaw;
 
-    const requestedPath = state.currentPath;
-    const requestedRaw = state.currentDoc.raw;
-    const requestRevision = editRevision;
-    const requestId = ++activeSaveRequest;
+        if (requestId !== coordinator.activeSaveRequest || hasNewerLocalEdits) {
+          set((current) => applySessionUpdate(current, path, (currentSession) => ({
+            ...currentSession,
+            doc: replaceCurrentDocRaw(currentSession.doc, currentSession.doc.raw, doc.meta.frontmatter, doc.meta.revision),
+            lastSavedRaw: requestedRaw,
+            saveStatus: resolveSaveSuccess({
+              hasPendingRemoteUpdate: currentSession.hasPendingRemoteUpdate,
+              hasNewerLocalEdits: true,
+              isDirty: currentSession.isDirty,
+              requestedRaw,
+            }).saveStatus,
+          })));
 
-    set({ saveStatus: "saving" });
-    try {
-      const doc = await api.saveDocument(
-        requestedPath,
-        requestedRaw,
-        state.currentDoc.meta.revision,
-        options?.keepalive ? { keepalive: true } : undefined,
-      );
+          const nextSession = sessionFromState(get(), path);
+          if (nextSession?.isDirty) {
+            persistDraftForSession(nextSession);
+            scheduleSave(path, 150);
+          }
+          return;
+        }
 
-      const latestState = get();
-      const latestCurrentDoc = latestState.currentDoc;
-      if (!latestCurrentDoc) {
-        return;
-      }
-      if (!shouldApplySaveResponse({
-        currentPath: latestState.currentPath,
-        requestedPath,
-        hasCurrentDoc: true,
-      })) {
-        return;
-      }
-
-      const hasNewerLocalEdits =
-        editRevision !== requestRevision ||
-        latestCurrentDoc.raw !== requestedRaw;
-
-      if (requestId !== activeSaveRequest || hasNewerLocalEdits) {
-        set({
-          currentDoc: latestCurrentDoc
-            ? replaceCurrentDocRaw(latestCurrentDoc, latestCurrentDoc.raw, doc.meta.frontmatter, doc.meta.revision)
-            : null,
-          lastSavedRaw: requestedRaw,
+        set((current) => applySessionUpdate(current, path, (currentSession) => ({
+          ...currentSession,
+          doc: {
+            ...doc,
+            content: doc.raw,
+          },
+          isDirty: false,
           saveStatus: resolveSaveSuccess({
-            hasPendingRemoteUpdate: latestState.hasPendingRemoteUpdate,
-            hasNewerLocalEdits: true,
-            isDirty: latestState.isDirty,
+            hasPendingRemoteUpdate: currentSession.hasPendingRemoteUpdate,
+            hasNewerLocalEdits: false,
+            isDirty: false,
             requestedRaw,
           }).saveStatus,
-        });
-        if (latestState.isDirty) {
-          persistDraftForState(get());
-          scheduleSave(150);
+          lastSavedRaw: requestedRaw,
+        })));
+        clearDocumentDraft(path);
+        syncCurrentSessionTitle(path, doc);
+
+        const afterSaveSession = sessionFromState(get(), path);
+        if (afterSaveSession?.pendingRemoteSnapshot) {
+          const merged = mergeConcurrentMarkdown({
+            base: afterSaveSession.pendingRemoteSnapshot.baseRaw,
+            local: requestedRaw,
+            remote: afterSaveSession.pendingRemoteSnapshot.raw,
+          });
+          const didChange = merged.raw !== requestedRaw;
+
+          set((current) => applySessionUpdate(current, path, (currentSession) => ({
+            ...currentSession,
+            doc: replaceCurrentDocRaw(currentSession.doc, didChange ? merged.raw : currentSession.doc.raw),
+            isDirty: didChange,
+            saveStatus: merged.droppedRemoteChanges ? "conflict" : didChange ? "idle" : "saved",
+            hasPendingRemoteUpdate: false,
+            pendingRemoteSnapshot: null,
+          })));
+          if (didChange) {
+            coordinator.editRevision += 1;
+            const nextSession = sessionFromState(get(), path);
+            if (nextSession) {
+              persistDraftForSession(nextSession);
+            }
+            scheduleSave(path, 80);
+          }
+        } else if (afterSaveSession?.hasPendingRemoteUpdate && path === get().currentPath) {
+          void get().reloadCurrentDocument();
         }
-        return;
-      }
+      } catch (error) {
+        const latestDocument = getVersionMismatchDocument(error);
+        if (latestDocument) {
+          const latestState = get();
+          const latestSession = sessionFromState(latestState, path);
+          if (!latestSession) return;
 
-      set({
-        currentDoc: {
-          ...doc,
-          content: doc.raw,
-        },
-        isDirty: false,
-        saveStatus: resolveSaveSuccess({
-          hasPendingRemoteUpdate: latestState.hasPendingRemoteUpdate,
-          hasNewerLocalEdits: false,
-          isDirty: false,
-          requestedRaw,
-        }).saveStatus,
-        lastSavedRaw: requestedRaw,
-      });
-      clearDocumentDraft(requestedPath);
+          const merged = mergeConcurrentMarkdown({
+            base: latestSession.lastSavedRaw,
+            local: requestedRaw,
+            remote: latestDocument.raw,
+          });
 
-      if (latestState.pendingRemoteSnapshot) {
-        const merged = mergeConcurrentMarkdown({
-          base: latestState.pendingRemoteSnapshot.baseRaw,
-          local: requestedRaw,
-          remote: latestState.pendingRemoteSnapshot.raw,
-        });
-        const didChange = merged.raw !== requestedRaw;
-
-        set((current) => ({
-          currentDoc: current.currentDoc
-            ? replaceCurrentDocRaw(current.currentDoc, didChange ? merged.raw : current.currentDoc.raw)
-            : null,
-          isDirty: didChange,
-          saveStatus: merged.droppedRemoteChanges ? "conflict" : didChange ? "idle" : "saved",
-          hasPendingRemoteUpdate: false,
-          pendingRemoteSnapshot: null,
-        }));
-        if (didChange) {
-          editRevision += 1;
-          persistDraftForState(get());
-          scheduleSave(80);
+          set((current) => applySessionUpdate(current, path, () => ({
+            path,
+            doc: {
+              ...latestDocument,
+              content: merged.raw,
+              raw: merged.raw,
+            },
+            isDirty: true,
+            saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
+            lastSavedRaw: latestDocument.raw,
+            hasPendingRemoteUpdate: false,
+            pendingRemoteSnapshot: null,
+            isComposing: false,
+            selection: latestSession.selection,
+            scrollTop: latestSession.scrollTop,
+          })));
+          syncCurrentSessionTitle(path, latestDocument);
+          if (!merged.droppedRemoteChanges) {
+            coordinator.editRevision += 1;
+            const nextSession = sessionFromState(get(), path);
+            if (nextSession) {
+              persistDraftForSession(nextSession);
+            }
+            scheduleSave(path, 80);
+          }
+          return;
         }
-      } else if (latestState.hasPendingRemoteUpdate) {
-        void get().reloadCurrentDocument();
+        set((current) => applySessionUpdate(current, path, (currentSession) => ({
+          ...currentSession,
+          saveStatus: "conflict",
+        })));
       }
-    } catch (error) {
-      const latestDocument = getVersionMismatchDocument(error);
-      if (latestDocument && get().currentPath === requestedPath) {
-        const merged = mergeConcurrentMarkdown({
-          base: state.lastSavedRaw,
-          local: requestedRaw,
-          remote: latestDocument.raw,
-        });
-
-        set(() => ({
-          currentDoc: {
-            ...latestDocument,
-            content: merged.raw,
-            raw: merged.raw,
-          },
-          isDirty: true,
-          saveStatus: merged.droppedRemoteChanges ? "conflict" : "idle",
-          lastSavedRaw: latestDocument.raw,
-          hasPendingRemoteUpdate: false,
-          pendingRemoteSnapshot: null,
-        }));
-        if (!merged.droppedRemoteChanges) {
-          editRevision += 1;
-          persistDraftForState(get());
-          scheduleSave(80);
-        }
-        return;
-      }
-      if (get().currentPath === requestedPath) {
-        set({ saveStatus: "conflict" });
-      }
-    }
     };
 
-    activeSavePromise = runSave().finally(() => {
-      activeSavePromise = null;
-      const followUp = queuedSaveOptions;
-      queuedSaveOptions = null;
+    coordinator.activeSavePromise = runSave().finally(() => {
+      coordinator.activeSavePromise = null;
+      const followUp = coordinator.queuedSaveOptions;
+      coordinator.queuedSaveOptions = null;
       if (!followUp) return;
 
-      const latestState = get();
-      if (!latestState.currentPath || !latestState.currentDoc) return;
-      if (latestState.isComposing) {
-        scheduleSave(100);
+      const latestSession = sessionFromState(get(), path);
+      if (!latestSession) return;
+      if (latestSession.isComposing) {
+        scheduleSave(path, 100);
         return;
       }
-      if (latestState.isDirty || latestState.hasPendingRemoteUpdate) {
-        void latestState.saveDocument(followUp);
+      if (latestSession.isDirty || latestSession.hasPendingRemoteUpdate) {
+        void get().saveDocument(followUp, path);
       }
     });
 
-    return activeSavePromise;
+    return coordinator.activeSavePromise;
   },
 
   beginComposition: () => {
-    set({ isComposing: true });
+    const path = get().currentPath;
+    if (!path) return;
+    set((current) => applySessionUpdate(current, path, (session) => ({
+      ...session,
+      isComposing: true,
+    })));
   },
 
   endComposition: () => {
-    const state = get();
-    set({ isComposing: false });
-    if (state.isDirty) {
-      scheduleSave(100);
+    const path = get().currentPath;
+    if (!path) return;
+    const before = sessionFromState(get(), path);
+    set((current) => applySessionUpdate(current, path, (session) => ({
+      ...session,
+      isComposing: false,
+    })));
+    const after = sessionFromState(get(), path);
+    if (!after) return;
+    if (after.isDirty) {
+      scheduleSave(path, 100);
       return;
     }
-    if (shouldReloadAfterCompositionEnd(state)) {
-      void get().saveDocument();
+    if (before && shouldReloadAfterCompositionEnd({
+      isDirty: after.isDirty,
+      hasPendingRemoteUpdate: after.hasPendingRemoteUpdate,
+    })) {
+      void get().saveDocument(undefined, path);
     }
   },
 
-  handleExternalUpdate: (raw, originClientId, frontmatter, revision) => {
-    const state = get();
-    if (!state.currentDoc) return;
+  updateEditorViewport: (snapshot) => {
+    const path = get().currentPath;
+    if (!path) return;
+    set((current) => applySessionUpdate(current, path, (session) => ({
+      ...session,
+      selection: snapshot.selection === undefined ? session.selection : snapshot.selection,
+      scrollTop: snapshot.scrollTop === undefined ? session.scrollTop : snapshot.scrollTop,
+    })));
+  },
 
-    const effectivelyDirty = state.isDirty || state.saveStatus === "saving";
+  handleExternalUpdate: (path, raw, originClientId, frontmatter, revision) => {
+    const state = get();
+    const session = sessionFromState(state, path);
+    if (!session) return;
+
+    const effectivelyDirty = session.isDirty || session.saveStatus === "saving";
     const resolution = resolveRemoteUpdate({
       raw,
-      currentRaw: state.currentDoc.raw,
-      lastSavedRaw: state.lastSavedRaw,
+      currentRaw: session.doc.raw,
+      lastSavedRaw: session.lastSavedRaw,
       isDirty: effectivelyDirty,
-      isComposing: state.isComposing,
-      hasPendingRemoteUpdate: state.hasPendingRemoteUpdate,
+      isComposing: session.isComposing,
+      hasPendingRemoteUpdate: session.hasPendingRemoteUpdate,
       originClientId,
       editorClientId: EDITOR_CLIENT_ID,
     });
@@ -508,42 +837,69 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       return;
     }
     if (resolution.action === "queue") {
-      set({
+      set((current) => applySessionUpdate(current, path, (currentSession) => ({
+        ...currentSession,
         hasPendingRemoteUpdate: true,
         pendingRemoteSnapshot: resolution.snapshot,
-      });
+      })));
       return;
     }
 
-    set((current) => ({
-      currentDoc: current.currentDoc
-        ? replaceCurrentDocRaw(current.currentDoc, resolution.raw, frontmatter, revision)
-        : null,
+    set((current) => applySessionUpdate(current, path, (currentSession) => ({
+      ...currentSession,
+      doc: replaceCurrentDocRaw(currentSession.doc, resolution.raw, frontmatter, revision),
       isDirty: false,
       saveStatus: resolution.saveStatus,
       lastSavedRaw: resolution.raw,
       hasPendingRemoteUpdate: false,
       pendingRemoteSnapshot: null,
-    }));
-    if (state.currentPath) {
-      clearDocumentDraft(state.currentPath);
-    }
+    })));
+    clearDocumentDraft(path);
   },
 
   handleExternalMove: (from, to) => {
     const state = get();
+    const nextSessions: Record<string, DocumentSession> = {};
+    for (const [path, session] of Object.entries(state.sessionsByPath)) {
+      const remappedPath = remapMovedPath(path, from, to);
+      if (!remappedPath) continue;
+      nextSessions[remappedPath] = {
+        ...session,
+        path: remappedPath,
+        doc: {
+          ...session.doc,
+          meta: {
+            ...session.doc.meta,
+            path: remappedPath,
+          },
+        },
+      };
+    }
+
     const nextPath = remapMovedPath(state.currentPath, from, to);
-    if (!nextPath || !state.currentDoc || nextPath === state.currentPath) return;
+    const nextCurrentDoc = state.currentDoc && nextPath
+      ? {
+          ...state.currentDoc,
+          meta: {
+            ...state.currentDoc.meta,
+            path: nextPath,
+          },
+        }
+      : state.currentDoc;
+
+    useTabStore.getState().updateTabPath(from, to);
+
     set({
       currentPath: nextPath,
-      currentDoc: {
-        ...state.currentDoc,
-        meta: {
-          ...state.currentDoc.meta,
-          path: nextPath,
-        },
-      },
+      currentDoc: nextCurrentDoc,
+      sessionsByPath: nextSessions,
     });
+    saveLastOpenedPath(nextPath);
+  },
+
+  hasSession: (path) => {
+    const state = get();
+    return Boolean(sessionFromState(state, path));
   },
 }));
 
@@ -552,8 +908,7 @@ export function getDocumentEditorClientId(): string {
 }
 
 export function resetDocumentStoreForTests(): void {
-  clearScheduledSave();
-  editRevision = 0;
-  resetSaveCoordinator();
+  resetAllSaveCoordinators();
   useDocumentStore.setState(createInitialState());
+  resetTabStoreForTests();
 }

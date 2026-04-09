@@ -80,7 +80,7 @@ def create_page(context, session: Session, doc_path: str):
 def editor_scroll_state(page) -> dict:
   return page.evaluate(
     """() => {
-      const scroller = document.querySelector('.cm-scroller');
+      const scroller = document.querySelector('.docs-editor-codemirror') || document.querySelector('.cm-scroller');
       return {
         windowY: window.scrollY,
         scrollerTop: scroller ? scroller.scrollTop : null,
@@ -104,6 +104,24 @@ def focus_line_end(page, text: str) -> None:
     raise AssertionError(f"Could not resolve bounding box for line: {text}")
   page.mouse.click(box["x"] + max(box["width"] - 8, 8), box["y"] + box["height"] / 2)
   page.wait_for_timeout(150)
+
+
+def open_tree_document(page, name: str) -> None:
+  node = page.locator("[data-tree-node='true']").filter(has_text=name).first
+  node.wait_for(timeout=10000)
+  node.click()
+  page.wait_for_timeout(800)
+
+
+def open_document_via_search(page, query: str) -> None:
+  modifier = "Meta" if sys.platform == "darwin" else "Control"
+  page.keyboard.press(f"{modifier}+p")
+  search_input = page.locator("input[placeholder='문서 검색…']")
+  search_input.wait_for(timeout=10000)
+  search_input.fill(query)
+  page.wait_for_timeout(600)
+  page.keyboard.press("Enter")
+  page.wait_for_timeout(900)
 
 
 def assert_no_runtime_issues(issues: list[str], case_name: str) -> None:
@@ -175,11 +193,17 @@ def case_outline_scroll(session: Session, suffix: str) -> None:
     page = create_page(context, session, doc_path)
     issues = collect_page_issues(page)
     page.locator(".docs-editor-outline__item").filter(has_text="Section Gamma").first.click()
-    page.wait_for_timeout(500)
+    page.wait_for_function(
+      """() => {
+        const scroller = document.querySelector('.docs-editor-codemirror') || document.querySelector('.cm-scroller');
+        return Boolean(scroller && scroller.scrollTop > 40);
+      }""",
+      timeout=3000,
+    )
     active_text = page.locator(".docs-editor-outline__item[data-active='true'] .docs-editor-outline__text").inner_text()
     scroll = page.evaluate(
       """() => {
-        const scroller = document.querySelector('.cm-scroller');
+        const scroller = document.querySelector('.docs-editor-codemirror') || document.querySelector('.cm-scroller');
         return scroller ? scroller.scrollTop : 0;
       }"""
     )
@@ -284,7 +308,7 @@ def case_mobile_checklist_edit(session: Session, suffix: str) -> None:
 
     page.evaluate(
       """() => {
-        const scroller = document.querySelector('.cm-scroller');
+        const scroller = document.querySelector('.docs-editor-codemirror') || document.querySelector('.cm-scroller');
         if (scroller) scroller.scrollTop = 600;
       }"""
     )
@@ -349,7 +373,7 @@ def case_desktop_checklist_edit(session: Session, suffix: str) -> None:
 
     page.evaluate(
       """() => {
-        const scroller = document.querySelector('.cm-scroller');
+        const scroller = document.querySelector('.docs-editor-codemirror') || document.querySelector('.cm-scroller');
         if (scroller) scroller.scrollTop = 600;
       }"""
     )
@@ -528,6 +552,70 @@ def case_desktop_task_toggle(session: Session, suffix: str) -> None:
   assert_no_runtime_issues(issues, "desktop-task-toggle")
 
 
+def case_desktop_tabs_restore(session: Session, suffix: str) -> None:
+  doc_a = f"regression/tabs-a-{suffix}.md"
+  doc_b = f"regression/tabs-b-{suffix}.md"
+  marker_a = f"A-{suffix}"
+  marker_b = f"B-{suffix}"
+
+  upsert_document(
+    session,
+    doc_a,
+    "\n".join([
+      "# Tab A",
+      "",
+      "alpha line",
+      "",
+    ]),
+  )
+  upsert_document(
+    session,
+    doc_b,
+    "\n".join([
+      "# Tab B",
+      "",
+      "beta line",
+      "",
+    ]),
+  )
+
+  with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context(viewport={"width": 1440, "height": 960})
+    page = create_page(context, session, doc_a)
+    issues = collect_page_issues(page)
+
+    focus_line_end(page, "alpha line")
+    page.keyboard.type(f" {marker_a}")
+    page.wait_for_timeout(200)
+
+    open_document_via_search(page, doc_b.split("/")[-1])
+    page.locator(f"[data-tab-activate='{doc_a}']").wait_for(timeout=10000)
+    page.locator(f"[data-tab-activate='{doc_b}']").wait_for(timeout=10000)
+
+    focus_line_end(page, "beta line")
+    page.keyboard.type(f" {marker_b}")
+    page.wait_for_timeout(200)
+
+    page.locator(f"[data-tab-activate='{doc_a}']").click()
+    page.wait_for_timeout(400)
+    visible_a = page.locator("body").inner_text()
+
+    page.locator(f"[data-tab-activate='{doc_b}']").click()
+    page.wait_for_timeout(400)
+    visible_b = page.locator("body").inner_text()
+
+    browser.close()
+
+  raw_a = get_document_raw(session, doc_a)
+  raw_b = get_document_raw(session, doc_b)
+  assert marker_a in raw_a, f"[desktop-tabs-restore] expected first tab edit in raw:\n{raw_a}"
+  assert marker_b in raw_b, f"[desktop-tabs-restore] expected second tab edit in raw:\n{raw_b}"
+  assert marker_a in visible_a, "[desktop-tabs-restore] expected first tab edit after switching back"
+  assert marker_b in visible_b, "[desktop-tabs-restore] expected second tab edit after switching back"
+  assert_no_runtime_issues(issues, "desktop-tabs-restore")
+
+
 CASES: dict[str, Callable[[Session, str], None]] = {
   "rich-preview-open": case_rich_preview_open,
   "outline-scroll": case_outline_scroll,
@@ -536,6 +624,7 @@ CASES: dict[str, Callable[[Session, str], None]] = {
   "mobile-checklist-edit": case_mobile_checklist_edit,
   "desktop-checklist-edit": case_desktop_checklist_edit,
   "desktop-task-toggle": case_desktop_task_toggle,
+  "desktop-tabs-restore": case_desktop_tabs_restore,
   "desktop-multiline-delete": case_desktop_multiline_delete,
   "desktop-external-link-click": case_desktop_external_link_click,
 }
@@ -545,6 +634,7 @@ DEFAULT_CASES = [
   "outline-scroll",
   "hr-render",
   "desktop-checklist-edit",
+  "desktop-tabs-restore",
   "desktop-multiline-delete",
   "desktop-external-link-click",
 ]

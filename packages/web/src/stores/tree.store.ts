@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api, type TreeDropTarget, type TreeMoveResult, type TreeNode } from "../api/client";
 import { useDocumentStore } from "./document.store";
+import { useTabStore } from "./tab.store.js";
 import { remapMovedPath } from "../lib/path-utils";
 
 interface TreeStore {
@@ -130,14 +131,25 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     } else {
       await api.deleteDocument(path);
     }
-    const currentPath = useDocumentStore.getState().currentPath;
-    if (currentPath === path || currentPath?.startsWith(`${path}/`)) {
-      useDocumentStore.getState().closeDocument();
+    const openTabPaths = useTabStore.getState().openTabs
+      .map((tab) => tab.path)
+      .filter((tabPath) => tabPath === path || tabPath.startsWith(`${path}/`));
+    for (const openPath of openTabPaths) {
+      await useDocumentStore.getState().closeDocument(openPath, { force: true });
     }
     await get().loadTree();
   },
 
   handleWSEvent: (event) => {
+    if ((event.type === "file:deleted" || event.type === "dir:deleted") && event.path) {
+      const openTabPaths = useTabStore.getState().openTabs
+        .map((tab) => tab.path)
+        .filter((tabPath) => tabPath === event.path || tabPath.startsWith(`${event.path}/`));
+      for (const openPath of openTabPaths) {
+        void useDocumentStore.getState().closeDocument(openPath, { force: true });
+      }
+    }
+
     const moveFrom = "from" in event && typeof event.from === "string" ? event.from : null;
     const moveTo = "to" in event && typeof event.to === "string" ? event.to : null;
     if (moveFrom && moveTo) {

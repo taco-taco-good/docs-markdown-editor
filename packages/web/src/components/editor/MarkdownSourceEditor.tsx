@@ -46,6 +46,14 @@ interface SelectionState {
   empty: boolean;
 }
 
+function toEditorSelection(snapshot: { from: number; to: number; head: number }, docLength: number): EditorSelection {
+  const from = Math.max(0, Math.min(snapshot.from, docLength));
+  const to = Math.max(0, Math.min(snapshot.to, docLength));
+  const head = Math.max(0, Math.min(snapshot.head, docLength));
+  const anchor = head === from ? to : from;
+  return EditorSelection.single(anchor, head);
+}
+
 function computeMinimalChange(source: string, next: string): { from: number; to: number; insert: string } {
   if (source === next) {
     return { from: 0, to: 0, insert: "" };
@@ -132,6 +140,9 @@ export function MarkdownSourceEditor() {
   const updateRaw = useDocumentStore((s) => s.updateRaw);
   const beginComposition = useDocumentStore((s) => s.beginComposition);
   const endComposition = useDocumentStore((s) => s.endComposition);
+  const currentSelection = useDocumentStore((s) => s.currentSelection);
+  const currentScrollTop = useDocumentStore((s) => s.currentScrollTop);
+  const updateEditorViewport = useDocumentStore((s) => s.updateEditorViewport);
   const outlineOpen = useUIStore((s) => s.outlineOpen);
   const showToast = useUIStore((s) => s.showToast);
 
@@ -144,6 +155,7 @@ export function MarkdownSourceEditor() {
     updateRaw,
     beginComposition,
     endComposition,
+    updateEditorViewport,
     showToast,
   });
   const [selectionPos, setSelectionPos] = useState(0);
@@ -199,15 +211,12 @@ export function MarkdownSourceEditor() {
   const scrollPositionIntoView = (view: EditorView, pos: number, align: "start" | "center") => {
     const container = scrollContainerRef.current;
     if (!container) return;
-
-    const coords = view.coordsAtPos(pos);
-    if (!coords) return;
-
-    const containerRect = container.getBoundingClientRect();
-    const absoluteTop = container.scrollTop + (coords.top - containerRect.top);
+    const lineBlock = view.lineBlockAt(pos);
+    const lineHeight = lineBlock.height || 24;
+    const absoluteTop = lineBlock.top;
     const margin = 96;
     const targetTop = align === "center"
-      ? absoluteTop - (container.clientHeight / 2) + ((coords.bottom - coords.top) / 2)
+      ? absoluteTop - (container.clientHeight / 2) + (lineHeight / 2)
       : absoluteTop - margin;
 
     container.scrollTo({
@@ -266,9 +275,10 @@ export function MarkdownSourceEditor() {
       updateRaw,
       beginComposition,
       endComposition,
+      updateEditorViewport,
       showToast,
     };
-  }, [beginComposition, currentPath, endComposition, showToast, updateRaw]);
+  }, [beginComposition, currentPath, endComposition, showToast, updateEditorViewport, updateRaw]);
 
   useEffect(() => {
     if (!hostRef.current || editorViewRef.current || !currentDoc) return;
@@ -276,6 +286,9 @@ export function MarkdownSourceEditor() {
     const view = new EditorView({
       state: EditorState.create({
         doc: currentDoc.raw,
+        selection: currentSelection
+          ? toEditorSelection(currentSelection, currentDoc.raw.length)
+          : undefined,
         extensions: createEditorExtensions({
           currentPath: currentDoc.meta.path,
           onDocChange: (raw) => {
@@ -285,6 +298,13 @@ export function MarkdownSourceEditor() {
             startTransition(() => {
               setSelectionPos(selection.head);
               setSelectionState(selection);
+              latestRefs.current.updateEditorViewport({
+                selection: {
+                  from: selection.from,
+                  to: selection.to,
+                  head: selection.head,
+                },
+              });
             });
           },
           onCompositionStart: () => latestRefs.current.beginComposition(),
@@ -326,6 +346,9 @@ export function MarkdownSourceEditor() {
       head: view.state.selection.main.head,
       empty: view.state.selection.main.empty,
     });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = currentScrollTop;
+    }
 
     return () => {
       view.destroy();
@@ -358,6 +381,25 @@ export function MarkdownSourceEditor() {
   }, [currentDoc?.meta.path, currentDoc?.raw]);
 
   useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || !currentSelection) return;
+    const from = Math.max(0, Math.min(currentSelection.from, view.state.doc.length));
+    const to = Math.max(0, Math.min(currentSelection.to, view.state.doc.length));
+    const head = Math.max(0, Math.min(currentSelection.head, view.state.doc.length));
+    const main = view.state.selection.main;
+    if (main.from === from && main.to === to && main.head === head) return;
+    view.dispatch({
+      selection: toEditorSelection({ from, to, head }, view.state.doc.length),
+    });
+  }, [currentDoc?.meta.path, currentSelection?.from, currentSelection?.to, currentSelection?.head]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTop = currentScrollTop;
+  }, [currentDoc?.meta.path, currentScrollTop]);
+
+  useEffect(() => {
     updateFloatingToolbar();
   }, [selectionState, currentDoc?.raw]);
 
@@ -365,10 +407,15 @@ export function MarkdownSourceEditor() {
     const container = scrollContainerRef.current;
     if (!container) return;
     const handleReposition = () => updateFloatingToolbar();
+    const handleScrollState = () => {
+      latestRefs.current.updateEditorViewport({ scrollTop: container.scrollTop });
+    };
     container.addEventListener("scroll", handleReposition, { passive: true });
+    container.addEventListener("scroll", handleScrollState, { passive: true });
     window.addEventListener("resize", handleReposition);
     return () => {
       container.removeEventListener("scroll", handleReposition);
+      container.removeEventListener("scroll", handleScrollState);
       window.removeEventListener("resize", handleReposition);
     };
   }, [currentDoc?.meta.path, selectionState]);
