@@ -15,8 +15,7 @@ export function EditorLayout() {
       <EditorToolbar />
       <div className="flex-1 flex min-h-0 relative">
         <div
-          className="flex-1 overflow-y-auto"
-          data-editor-scroll-container="true"
+          className="flex-1 min-h-0"
           style={{ background: "var(--color-surface-0)" }}
         >
           <MarkdownSourceEditor />

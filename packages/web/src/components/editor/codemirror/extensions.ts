@@ -77,6 +77,17 @@ function skipWhileComposing(command: (view: EditorView) => boolean): (view: Edit
   };
 }
 
+function isMarkupContinuationLine(view: EditorView): boolean {
+  const head = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(head).text;
+  return /^(\s*)(-\s\[[ xX]\]\s+|[-+*]\s+|\d+\.\s+|>\s+)/.test(line);
+}
+
+function continueNativeMarkdownMarkup(view: EditorView): boolean {
+  if (!isMarkupContinuationLine(view)) return false;
+  return insertNewlineContinueMarkup(view);
+}
+
 function computeMinimalChange(source: string, next: string): { from: number; to: number; insert: string } {
   if (source === next) {
     return { from: 0, to: 0, insert: "" };
@@ -150,7 +161,7 @@ export function createEditorExtensions(options: {
       {
         key: "Enter",
         run: skipWhileComposing(
-          chainKeyRuns(autoCloseCodeFence, continueMarkdownMarkup, insertNewlineContinueMarkup, insertNewlineAndIndent),
+          chainKeyRuns(autoCloseCodeFence, continueMarkdownMarkup, continueNativeMarkdownMarkup, insertNewlineAndIndent),
         ),
       },
       {

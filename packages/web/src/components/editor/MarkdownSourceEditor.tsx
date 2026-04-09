@@ -211,17 +211,42 @@ export function MarkdownSourceEditor() {
   const scrollPositionIntoView = (view: EditorView, pos: number, align: "start" | "center") => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const lineBlock = view.lineBlockAt(pos);
-    const lineHeight = lineBlock.height || 24;
-    const absoluteTop = lineBlock.top;
-    const margin = 96;
-    const targetTop = align === "center"
-      ? absoluteTop - (container.clientHeight / 2) + (lineHeight / 2)
-      : absoluteTop - margin;
+    const domAtPos = view.domAtPos(pos);
+    const lineElement = (
+      domAtPos.node instanceof HTMLElement
+        ? domAtPos.node.closest(".cm-line")
+        : domAtPos.node.parentElement?.closest(".cm-line")
+    ) as HTMLElement | null;
 
-    container.scrollTo({
-      top: Math.max(0, targetTop),
-      behavior: "smooth",
+    if (lineElement) {
+      lineElement.scrollIntoView({
+        block: align === "center" ? "center" : "start",
+        inline: "nearest",
+        behavior: "smooth",
+      });
+    }
+
+    const lineBlock = view.lineBlockAt(pos);
+    const sampleLine = hostRef.current?.querySelector(".cm-line");
+    const sampleLineHeight = sampleLine
+      ? Number.parseFloat(window.getComputedStyle(sampleLine).lineHeight)
+      : NaN;
+    const lineHeight = Number.isFinite(sampleLineHeight) && sampleLineHeight > 0
+      ? sampleLineHeight
+      : (lineBlock.height || 28);
+    const lineNumber = view.state.doc.lineAt(pos).number;
+    const estimatedTop = Math.max(lineBlock.top, (lineNumber - 1) * lineHeight);
+    const margin = 96;
+    const targetTop = Math.max(0, align === "center"
+      ? estimatedTop - (container.clientHeight / 2) + (lineHeight / 2)
+      : estimatedTop - margin);
+
+    requestAnimationFrame(() => {
+      if (Math.abs(container.scrollTop - targetTop) < 2) return;
+      container.scrollTo({
+        top: targetTop,
+        behavior: "smooth",
+      });
     });
   };
 
