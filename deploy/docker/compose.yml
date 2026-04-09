@@ -1,9 +1,6 @@
 services:
   docs-markdown-editor:
-    container_name: docs-markdown-editor
     image: ${IMAGE_NAME:-docs-markdown-editor:local}
-    env_file:
-      - ../../.env
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile

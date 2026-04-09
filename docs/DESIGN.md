@@ -1,52 +1,71 @@
 # Foldmark Design System
 
-## Core Principle
+Foldmark should feel like one product, not a collection of separate screens.
 
-Foldmark is not a theme picker around one static UI. The product should feel like one coherent markdown workspace whose tokens, overlays, fields, and interaction states move together.
+The editor, sidebar, search, settings, auth, and dialogs should all read as the same workspace.
 
-## Token Layers
+## Product character
 
-### Semantic colors
+- calm
+- compact
+- file-first
+- dark-forward, but themeable
+- keyboard-friendly
 
-- `--color-surface-*`: workspace and panel surfaces
-- `--color-text-*`: hierarchy of text contrast
-- `--color-accent*`: primary action and active state
-- `--color-border*`: resting and active boundaries
-- `--color-danger`, `--color-warning`, `--color-success`, `--color-info`: status semantics
+The UI should support long writing sessions. It should feel stable and quiet rather than decorative.
 
-### UI semantics
+## Token layers
 
-- `--radius-panel`, `--radius-control`, `--radius-pill`
-- `--shadow-panel`, `--shadow-floating`
-- `--focus-ring`, `--focus-ring-offset`
+### Semantic color tokens
+
+- `--color-surface-*`
+- `--color-text-*`
+- `--color-border*`
+- `--color-accent*`
+- `--color-danger`
+- `--color-warning`
+- `--color-success`
+- `--color-info`
+
+These tokens describe meaning, not individual screens.
+
+### UI tokens
+
+- `--radius-panel`
+- `--radius-control`
+- `--radius-pill`
+- `--shadow-panel`
+- `--shadow-floating`
+- `--focus-ring`
+- `--focus-ring-offset`
 - `--overlay-backdrop`
+- font size scale tokens in `globals.css`
 
-Themes may customize both color and UI semantics. A theme is incomplete if it only swaps palette values.
+Themes may change both color and UI tone. A theme is incomplete if it only swaps palette values.
 
-## Primitive Components
+## Core primitives
 
-### Dialogs
+### Buttons
 
-Use shared dialog primitives for all overlays:
+Use:
 
-- `.ui-dialog-backdrop`
-- `.ui-dialog-panel`
-- `.ui-dialog-header`
-- `.ui-dialog-body`
-- `.ui-dialog-footer`
+- `.ui-button`
+- `.ui-button--solid`
+- `.ui-button--primary`
+- `.ui-button--ghost`
+- `.ui-button--danger`
+- `.ui-button--header`
+- `.ui-icon-button`
 
 Rules:
 
-- Every modal uses `role="dialog"` and `aria-modal="true"`
-- Every modal has an accessible title via `aria-labelledby`
-- Focus enters the dialog on open
-- `Tab` is trapped within the dialog
-- `Escape` closes the dialog
-- Focus returns to the previously focused element on close
+- hover, focus-visible, active, and disabled states must feel related
+- icon-only buttons must have `aria-label`
+- header actions may use denser spacing, but should still come from the same button family
 
 ### Fields
 
-Use shared field primitives for all forms:
+Use:
 
 - `.ui-field`
 - `.ui-label`
@@ -57,51 +76,63 @@ Use shared field primitives for all forms:
 
 Rules:
 
-- Labels must bind via `htmlFor` and `id`
-- Inputs must declare `name`
-- Inputs should provide `autocomplete` when the browser can help
+- labels must bind with `htmlFor`
+- inputs must declare `id` and `name`
+- use `autocomplete` where browsers can help
 
-### Buttons
+### Dialogs
 
-Use shared button primitives:
+Use shared dialog structure:
 
-- `.ui-button`
-- `.ui-button--primary`
-- `.ui-button--solid`
-- `.ui-button--danger`
-- `.ui-button--ghost`
-- `.ui-icon-button`
+- `.ui-dialog-backdrop`
+- `.ui-dialog-panel`
+- `.ui-dialog-header`
+- `.ui-dialog-body`
+- `.ui-dialog-footer`
 
 Rules:
 
-- Hover, focus-visible, disabled, and pressed states must read as one system
-- Icon-only actions must have `aria-label`
+- every modal uses `role="dialog"` and `aria-modal="true"`
+- every modal has an accessible title
+- focus enters the dialog on open
+- `Tab` stays trapped
+- `Escape` closes
+- focus returns to the previously focused element on close
 
-## Overlay Language
+## Editor-specific rules
 
-Search, settings, create flows, and template management should feel like one family:
+- Markdown storage stays plain and portable
+- visual rendering should never hide the fact that the source is markdown-backed
+- selection, caret, and live preview behavior matter more than decorative styling
+- code blocks, tables, tasks, links, and outline should look like one editor language
 
-- same backdrop treatment
-- same panel radius and shadow
+## Overlay language
+
+Search, create flows, template management, and settings should all feel related.
+
+That means:
+
+- same backdrop logic
+- same radius family
 - same header spacing
-- same close affordance
-- same focus behavior
+- same footer action rhythm
+- same focus ring rules
 
-Avoid inventing a new card or modal style per screen.
+Do not invent a separate modal design for each screen.
 
-## Accessibility Baseline
+## Accessibility baseline
 
-- Buttons, links, fields, and custom interactive elements must expose visible `:focus-visible`
-- Dialogs must be keyboard reachable and dismissible
-- Form labels must be explicit, not visual-only
+- every interactive element exposes visible `:focus-visible`
+- dialog flows are fully keyboard reachable
+- labels are explicit
+- color alone should not carry state meaning
 
-## Browser Chrome
+## Browser chrome
 
 Theme changes should also update:
 
-- `<meta name="theme-color">`
-- favicon
-- apple touch icon
+- `theme-color`
+- favicon / app icon
 - `color-scheme`
 
-The browser shell is part of the product surface.
+The browser shell is part of the product surface, especially on mobile.
