@@ -115,6 +115,42 @@ test("closeDocuments removes closed tabs and activates the requested next tab", 
   }
 });
 
+test("closeDocuments removes a restored tab even when its session has not been loaded yet", async () => {
+  resetDocumentStoreForTests();
+
+  const originalGetDocument = api.getDocument;
+  api.getDocument = (async (docPath: string) => {
+    if (docPath === "notes/a.md") return createDocument("# A\n", "rev-a", "notes/a.md", "A");
+    throw new Error(`unexpected path: ${docPath}`);
+  }) as typeof api.getDocument;
+
+  try {
+    await useDocumentStore.getState().openDocument("notes/a.md");
+    useTabStore.getState().openTab("notes/b.md", "B");
+
+    assert.deepEqual(
+      useTabStore.getState().openTabs.map((tab) => tab.path),
+      ["notes/a.md", "notes/b.md"],
+    );
+    assert.equal(useDocumentStore.getState().sessionsByPath["notes/b.md"], undefined);
+
+    await useDocumentStore.getState().closeDocuments(["notes/b.md"], {
+      force: true,
+      nextPath: "notes/a.md",
+    });
+
+    assert.deepEqual(
+      useTabStore.getState().openTabs.map((tab) => tab.path),
+      ["notes/a.md"],
+    );
+    assert.equal(useTabStore.getState().activeTabPath, "notes/a.md");
+    assert.equal(useDocumentStore.getState().currentPath, "notes/a.md");
+  } finally {
+    api.getDocument = originalGetDocument;
+    resetDocumentStoreForTests();
+  }
+});
+
 test("handleExternalMove remaps tab paths and document sessions", async () => {
   resetDocumentStoreForTests();
 

@@ -327,7 +327,7 @@ function scheduleSave(path: string, delayMs = 300): void {
 }
 
 function syncCurrentSessionTitle(path: string, doc: Document): void {
-  const title = doc.meta.title || doc.meta.path.split("/").pop() || doc.meta.path;
+  const title = doc.meta.path.split("/").pop() || path;
   useTabStore.getState().updateTabTitle(path, title);
 }
 
@@ -439,14 +439,17 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     const targetSessions = uniquePaths
       .map((path) => sessionFromState(persisted, path))
       .filter((session): session is DocumentSession => Boolean(session));
+    const targetSessionPaths = new Set(targetSessions.map((session) => session.path));
+    const tabState = useTabStore.getState();
+    const existingTabPaths = new Set(tabState.openTabs.map((tab) => tab.path));
+    const closablePaths = uniquePaths.filter((path) => targetSessionPaths.has(path) || existingTabPaths.has(path));
 
-    if (targetSessions.length === 0) return;
+    if (closablePaths.length === 0) return;
     if (!options?.force && targetSessions.some((session) => session.isDirty)) {
       return;
     }
 
-    const closeSet = new Set(targetSessions.map((session) => session.path));
-    const tabState = useTabStore.getState();
+    const closeSet = new Set(closablePaths);
     const fallbackNextPath = activePath && closeSet.has(activePath)
       ? tabState.getNextPathAfterClose(activePath)
       : activePath;
@@ -464,7 +467,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     }
 
     useTabStore.getState().closeTabs(
-      targetSessions.map((session) => session.path),
+      closablePaths,
       preferredNextPath,
     );
 
@@ -474,8 +477,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     set((current) => {
       const currentPersisted = withPersistedCurrentSession(current);
       const sessionsByPath = { ...currentPersisted.sessionsByPath };
-      for (const session of targetSessions) {
-        delete sessionsByPath[session.path];
+      for (const path of closablePaths) {
+        delete sessionsByPath[path];
       }
 
       if (nextActivePath && sessionsByPath[nextActivePath]) {

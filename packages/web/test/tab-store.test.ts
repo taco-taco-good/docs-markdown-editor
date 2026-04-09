@@ -49,3 +49,48 @@ test("tab store can close tabs to the right and close all while keeping pinned t
   );
   assert.equal(useTabStore.getState().activeTabPath, "notes/a.md");
 });
+
+test("tab hydration normalizes persisted titles back to file names", () => {
+  resetTabStoreForTests();
+
+  const storage = new Map<string, string>();
+  const originalLocalStorage = globalThis.localStorage;
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+    },
+  });
+
+  globalThis.localStorage.setItem("foldmark-open-tabs", JSON.stringify({
+    openTabs: [
+      {
+        path: "notes/work.md",
+        title: "todo-work",
+        pinned: false,
+        lastVisitedAt: Date.now(),
+      },
+    ],
+    activeTabPath: "notes/work.md",
+  }));
+
+  try {
+    useTabStore.getState().hydrate();
+
+    assert.deepEqual(
+      useTabStore.getState().openTabs.map((tab) => ({ path: tab.path, title: tab.title })),
+      [{ path: "notes/work.md", title: "work.md" }],
+    );
+  } finally {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: originalLocalStorage,
+    });
+  }
+});

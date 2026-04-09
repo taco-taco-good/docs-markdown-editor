@@ -113,7 +113,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
       .filter((tab) => typeof tab.path === "string" && tab.path.length > 0)
       .map((tab) => ({
         path: tab.path,
-        title: tab.title || titleFromPath(tab.path),
+        title: titleFromPath(tab.path),
         pinned: Boolean(tab.pinned),
         lastVisitedAt: typeof tab.lastVisitedAt === "number" ? tab.lastVisitedAt : Date.now(),
       }));
@@ -134,7 +134,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
     set((state) => {
       const existing = state.openTabs.find((tab) => tab.path === path);
       const openTabs = existing
-        ? state.openTabs.map((tab) => (tab.path === path ? { ...tab, title: title ?? tab.title, lastVisitedAt: now } : tab))
+        ? state.openTabs.map((tab) => (tab.path === path ? { ...tab, title: title ?? titleFromPath(path), lastVisitedAt: now } : tab))
         : normalizeTabOrder([
             ...state.openTabs,
             {

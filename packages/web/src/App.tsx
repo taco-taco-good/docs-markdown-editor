@@ -12,6 +12,7 @@ import { registerDocumentPersistenceLifecycle } from "./lib/document-lifecycle";
 import { useAuthStore } from "./stores/auth.store";
 import { useDocumentStore, getLastOpenedPath } from "./stores/document.store";
 import { useTabStore } from "./stores/tab.store.js";
+import { useTreeStore } from "./stores/tree.store";
 import { useUIStore } from "./stores/ui.store";
 
 export function App() {
@@ -55,6 +56,8 @@ export function App() {
 function AuthenticatedApp() {
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const settingsOpen = useUIStore((s) => s.settingsOpen);
+  const currentPath = useDocumentStore((s) => s.currentPath);
+  const selectTreePath = useTreeStore((s) => s.selectPath);
   useWebSocket();
 
   useEffect(() => {
@@ -111,6 +114,10 @@ function AuthenticatedApp() {
       setSidebarOpen(false);
     }
   }, [setSidebarOpen]);
+
+  useEffect(() => {
+    selectTreePath(currentPath ?? "");
+  }, [currentPath, selectTreePath]);
 
   // Restore last opened document
   useEffect(() => {

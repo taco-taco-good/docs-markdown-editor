@@ -66,6 +66,7 @@ export function EditorTabs() {
   const toggleOutline = useUIStore((s) => s.toggleOutline);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [draggedPath, setDraggedPath] = useState<string | null>(null);
   const [menu, setMenu] = useState<TabContextMenuState | null>(null);
 
@@ -83,10 +84,10 @@ export function EditorTabs() {
   const titleByPath = useMemo(() => {
     const map = new Map<string, string>();
     for (const [path, session] of Object.entries(sessionsByPath)) {
-      map.set(path, session.doc.meta.title || session.doc.meta.path.split("/").pop() || path);
+      map.set(path, session.doc.meta.path.split("/").pop() || path);
     }
     if (currentPath && currentDoc) {
-      map.set(currentPath, currentDoc.meta.title || currentDoc.meta.path.split("/").pop() || currentPath);
+      map.set(currentPath, currentDoc.meta.path.split("/").pop() || currentPath);
     }
     return map;
   }, [currentDoc, currentPath, sessionsByPath]);
@@ -128,6 +129,24 @@ export function EditorTabs() {
     };
   }, [menu]);
 
+  useEffect(() => {
+    if (!activeTabPath) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const activeButton = scroller.querySelector<HTMLElement>(`[data-tab-activate="${activeTabPath}"]`);
+    if (!activeButton) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      activeButton.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabPath, openTabs]);
+
   if (openTabs.length === 0) return null;
 
   return (
@@ -139,7 +158,7 @@ export function EditorTabs() {
         borderColor: "var(--color-border)",
       }}
     >
-      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden">
+      <div ref={scrollerRef} className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden">
         <div className="min-w-max h-full flex items-stretch">
         {openTabs.map((tab, index) => {
           const isActive = tab.path === activeTabPath;
@@ -197,7 +216,7 @@ export function EditorTabs() {
                     top: containerRect ? event.clientY - containerRect.top : event.clientY,
                   });
                 }}
-                title={tab.path}
+                title={title}
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full shrink-0"
