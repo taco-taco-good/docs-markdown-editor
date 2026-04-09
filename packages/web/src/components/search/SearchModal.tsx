@@ -3,6 +3,7 @@ import { useUIStore } from "../../stores/ui.store";
 import { useDocumentStore } from "../../stores/document.store";
 import { useTreeStore } from "../../stores/tree.store";
 import { useSearch } from "../../hooks/useSearch";
+import { useDialog } from "../../hooks/useDialog";
 
 export function SearchModal() {
   const isOpen = useUIStore((s) => s.searchOpen);
@@ -12,6 +13,7 @@ export function SearchModal() {
   const { query, results, loading, error, search, reset } = useSearch();
   const inputRef = useRef<HTMLInputElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const panelRef = useDialog<HTMLDivElement>({ open: isOpen, onClose: closeSearch, initialFocusRef: inputRef });
 
   // Focus input when modal opens
   useEffect(() => {
@@ -78,27 +80,30 @@ export function SearchModal() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center px-2 sm:px-4 pt-4 sm:pt-[15vh]">
+    <div className="ui-dialog-backdrop z-50 items-start px-2 sm:px-4 pt-4 sm:pt-[15vh]">
       {/* Backdrop */}
       <div
         className="absolute inset-0 animate-fade-in"
-        style={{ background: "rgba(0, 0, 0, 0.6)", backdropFilter: "blur(4px)" }}
         onClick={closeSearch}
+        aria-hidden="true"
       />
 
       {/* Modal */}
       <div
-        className="relative w-full max-w-xl rounded-xl overflow-hidden animate-scale-in"
-        style={{
-          background: "var(--color-surface-2)",
-          border: "1px solid var(--color-border-active)",
-          boxShadow: "0 24px 48px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.03)",
-          maxHeight: "min(78vh, 42rem)",
-        }}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="search-modal-title"
+        className="ui-dialog-panel relative w-full max-w-xl animate-scale-in"
+        style={{ maxHeight: "min(78vh, 42rem)" }}
         onKeyDown={handleKeyDown}
+        tabIndex={-1}
       >
         {/* Search input */}
         <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b" style={{ borderColor: "var(--color-border)" }}>
+          <h2 id="search-modal-title" className="sr-only">
+            문서 검색
+          </h2>
           <svg
             width="16"
             height="16"
@@ -114,15 +119,18 @@ export function SearchModal() {
           <input
             ref={inputRef}
             type="text"
+            name="workspace-search"
+            autoComplete="off"
             value={query}
             onChange={(e) => search(e.target.value)}
             placeholder="문서 검색…"
-            className="flex-1 bg-transparent outline-none text-sm"
+            className="flex-1 bg-transparent text-sm"
             style={{
               color: "var(--color-text-primary)",
               fontFamily: "var(--font-ui)",
               caretColor: "var(--color-accent)",
             }}
+            aria-label="문서 검색"
           />
           {loading && (
             <div

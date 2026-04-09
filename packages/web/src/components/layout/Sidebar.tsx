@@ -68,7 +68,7 @@ export function Sidebar() {
           <div className="flex items-center gap-0.5">
             <button
               type="button"
-              className="h-6 w-6 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+              className="ui-icon-button h-6 w-6"
               onClick={() => {
                 setCreateParentPath("");
                 setCreateOpen(true);
@@ -83,7 +83,7 @@ export function Sidebar() {
             </button>
             <button
               type="button"
-              className="h-6 w-6 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+              className="ui-icon-button h-6 w-6"
               onClick={() => {
                 setCreateParentPath("");
                 setCreateFolderOpen(true);

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, type TemplateMeta } from "../../api/client";
 import { useTreeStore } from "../../stores/tree.store";
 import { useDocumentStore } from "../../stores/document.store";
 import { TemplateManagerModal } from "./TemplateManagerModal";
+import { useDialog } from "../../hooks/useDialog";
 
 function normalizeFileName(name: string): string {
   return name
@@ -33,6 +34,8 @@ export function CreateDocumentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [manageTemplatesOpen, setManageTemplatesOpen] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useDialog<HTMLDivElement>({ open, onClose, initialFocusRef: nameInputRef });
 
   const loadTemplates = async () => {
     const items = await api.getTemplates();
@@ -97,47 +100,40 @@ export function CreateDocumentModal({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center px-4"
-        style={{ background: "rgba(9, 11, 17, 0.78)" }}
+        className="ui-dialog-backdrop z-50"
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) onClose();
         }}
       >
         <div
-          className="w-full max-w-xl rounded-2xl border shadow-2xl animate-slide-up"
-          style={{
-            background: "var(--color-surface-1)",
-            borderColor: "var(--color-border)",
-          }}
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-document-title"
+          className="ui-dialog-panel w-full max-w-xl animate-slide-up"
+          tabIndex={-1}
         >
-          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--color-border)" }}>
+          <div className="ui-dialog-header">
             <div>
-              <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+              <h2 id="create-document-title" className="ui-dialog-heading">
                 새 문서
               </h2>
-              <p className="text-xs mt-1" style={{ color: "var(--color-text-secondary)" }}>
+              <p className="ui-dialog-description">
                 파일 이름과 템플릿만 정하면 새 마크다운 파일을 만듭니다.
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-lg transition-colors"
-              style={{ color: "var(--color-text-muted)" }}
+              className="ui-icon-button"
+              aria-label="닫기"
             >
               ×
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
-            <div
-              className="rounded-xl px-3 py-3 text-sm"
-              style={{
-                background: "var(--color-surface-2)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-secondary)",
-              }}
-            >
+          <form onSubmit={handleSubmit} className="ui-dialog-body">
+            <div className="ui-card rounded-[calc(var(--radius-control)+4px)] px-3 py-3 text-sm" style={{ color: "var(--color-text-secondary)" }}>
               <div className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--color-text-tertiary)" }}>
                 저장 위치
               </div>
@@ -149,38 +145,34 @@ export function CreateDocumentModal({
               </p>
             </div>
 
-            <label className="block">
-              <span className="block text-[11px] uppercase tracking-wider mb-2" style={{ color: "var(--color-text-tertiary)" }}>
+            <label className="ui-field">
+              <span className="ui-label">
                 문서 이름
               </span>
               <input
+                ref={nameInputRef}
+                id="create-document-name"
+                name="documentName"
+                autoComplete="off"
                 value={fileName}
                 onChange={(event) => setFileName(event.target.value.replace(/\.md$/i, ""))}
                 placeholder="예: api-guide"
                 required
-                className="w-full h-11 px-3 rounded-xl text-sm outline-none"
-                style={{
-                  background: "var(--color-surface-3)",
-                  color: "var(--color-text-primary)",
-                  border: "1px solid var(--color-border)",
-                }}
+                className="ui-input text-sm"
               />
             </label>
 
             <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-              <label className="block">
-                <span className="block text-[11px] uppercase tracking-wider mb-2" style={{ color: "var(--color-text-tertiary)" }}>
+              <label className="ui-field">
+                <span className="ui-label">
                   템플릿
                 </span>
                 <select
+                  id="create-document-template"
+                  name="documentTemplate"
                   value={template}
                   onChange={(event) => setTemplate(event.target.value)}
-                  className="w-full h-11 px-3 rounded-xl text-sm outline-none"
-                  style={{
-                    background: "var(--color-surface-3)",
-                    color: "var(--color-text-primary)",
-                    border: "1px solid var(--color-border)",
-                  }}
+                  className="ui-select text-sm"
                 >
                   {templates.map((item) => (
                     <option key={item.name} value={item.name}>
@@ -193,12 +185,7 @@ export function CreateDocumentModal({
               <button
                 type="button"
                 onClick={() => setManageTemplatesOpen(true)}
-                className="h-11 px-3 rounded-xl text-sm"
-                style={{
-                  background: "var(--color-surface-3)",
-                  color: "var(--color-text-primary)",
-                  border: "1px solid var(--color-border)",
-                }}
+                className="ui-button text-sm"
               >
                 템플릿 관리
               </button>
@@ -210,27 +197,18 @@ export function CreateDocumentModal({
               </p>
             )}
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="ui-dialog-footer pt-1 px-0 pb-0">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 h-10 rounded-xl text-sm"
-                style={{
-                  background: "var(--color-surface-3)",
-                  color: "var(--color-text-secondary)",
-                }}
+                className="ui-button text-sm"
               >
                 취소
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 h-10 rounded-xl text-sm font-medium"
-                style={{
-                  background: "var(--color-accent)",
-                  color: "#111318",
-                  opacity: loading ? 0.7 : 1,
-                }}
+                className="ui-button ui-button--solid text-sm font-medium"
               >
                 {loading ? "생성 중…" : "문서 생성"}
               </button>

@@ -55,8 +55,9 @@ export function Header() {
       {/* Sidebar toggle */}
       <button
         onClick={toggleSidebar}
-        className="w-7 h-7 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+        className="ui-icon-button"
         aria-label="Toggle sidebar"
+        type="button"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
           {sidebarOpen ? (
@@ -81,11 +82,12 @@ export function Header() {
 
       {workspaceName ? (
         <div
-          className="hidden sm:block min-w-0 max-w-[32vw] truncate rounded-md px-2.5 py-1 text-xs"
+          className="hidden sm:block min-w-0 max-w-[32vw] truncate rounded-md px-2.5 py-1"
           style={{
             background: "var(--color-surface-2)",
             color: "var(--color-text-secondary)",
             border: "1px solid var(--color-border)",
+            fontSize: "var(--font-size-xs)",
           }}
           title={workspaceRoot}
         >
@@ -99,13 +101,10 @@ export function Header() {
       {/* Search trigger */}
       <button
         onClick={openSearch}
-        className="flex items-center gap-2 h-8 px-2.5 md:px-3 rounded-md text-xs transition-colors shrink-0"
+        className="ui-button ui-button--header flex items-center gap-1.5 h-8 px-2 md:px-2.5 shrink-0"
+        type="button"
         aria-label="빠른 열기"
-        style={{
-          background: "var(--color-surface-2)",
-          color: "var(--color-text-tertiary)",
-          border: "1px solid var(--color-border)",
-        }}
+        style={{ color: "var(--color-text-tertiary)" }}
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="6.5" cy="6.5" r="5" />
@@ -113,10 +112,11 @@ export function Header() {
         </svg>
         <span className="hidden sm:inline">빠른 열기</span>
         <kbd
-          className="ml-1 px-1 rounded text-[10px]"
+          className="ml-1 px-1 rounded"
           style={{
             background: "var(--color-surface-3)",
             color: "var(--color-text-muted)",
+            fontSize: "var(--font-size-2xs)",
           }}
         >
           ⌘P
@@ -125,7 +125,13 @@ export function Header() {
 
       {/* Save status */}
       {currentPath && (
-        <div className="hidden sm:flex items-center gap-1.5 text-[11px] ml-2" style={{ color: "var(--color-text-muted)" }}>
+        <div
+          className="hidden sm:flex items-center gap-1.5 ml-2"
+          style={{
+            color: "var(--color-text-muted)",
+            fontSize: "var(--font-size-2xs)",
+          }}
+        >
           {saveStatus === "saving" && (
             <>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--color-accent)" }} />
@@ -155,27 +161,30 @@ export function Header() {
 
       <div className="flex items-center gap-1.5 ml-2 sm:ml-3 pl-2 sm:pl-3 border-l" style={{ borderColor: "var(--color-border)" }}>
         {username && (
-          <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+          <span
+            style={{
+              color: "var(--color-text-secondary)",
+              fontSize: "var(--font-size-xs)",
+            }}
+          >
             {username}
           </span>
         )}
         <button
           onClick={openSettings}
-          className="w-7 h-7 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          className="ui-icon-button"
           style={{ color: "var(--color-text-muted)" }}
           aria-label="설정"
           title="설정"
+          type="button"
         >
           <SettingsIcon />
         </button>
         <button
           onClick={() => void logout()}
-          className="h-7 px-2.5 rounded-md text-xs transition-colors"
-          style={{
-            background: "var(--color-surface-2)",
-            color: "var(--color-text-secondary)",
-            border: "1px solid var(--color-border)",
-          }}
+          className="ui-button ui-button--header h-7 px-2"
+          style={{ color: "var(--color-text-secondary)" }}
+          type="button"
         >
           로그아웃
         </button>

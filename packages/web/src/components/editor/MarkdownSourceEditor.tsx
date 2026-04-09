@@ -83,6 +83,52 @@ function computeMinimalChange(source: string, next: string): { from: number; to:
   };
 }
 
+function estimateRenderedLineHeight(line: string, baseLineHeight: number): number {
+  const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+  if (/^#\s+/.test(normalized)) return baseLineHeight * 2.7;
+  if (/^##\s+/.test(normalized)) return baseLineHeight * 2.15;
+  if (/^###\s+/.test(normalized)) return baseLineHeight * 1.75;
+  if (/^####\s+/.test(normalized)) return baseLineHeight * 1.45;
+  return baseLineHeight;
+}
+
+function estimateScrollTopForPosition(
+  raw: string,
+  pos: number,
+  baseLineHeight: number,
+  viewportHeight: number,
+  align: "start" | "center",
+): number {
+  const clamped = Math.max(0, Math.min(pos, raw.length));
+  const lineNumber = raw.slice(0, clamped).split("\n").length;
+  const lines = raw.split("\n");
+  let top = 0;
+
+  for (let index = 0; index < lineNumber - 1 && index < lines.length; index += 1) {
+    top += estimateRenderedLineHeight(lines[index] ?? "", baseLineHeight);
+  }
+
+  const currentLineHeight = estimateRenderedLineHeight(lines[lineNumber - 1] ?? "", baseLineHeight);
+  if (align === "center") {
+    return Math.max(0, top - (viewportHeight / 2) + (currentLineHeight / 2));
+  }
+
+  return Math.max(0, top - 96);
+}
+
+function findLineElementAtPos(view: EditorView, pos: number): HTMLElement | null {
+  const clamped = Math.max(0, Math.min(pos, view.state.doc.length));
+  try {
+    const domAtPos = view.domAtPos(clamped);
+    if (domAtPos.node instanceof HTMLElement) {
+      return domAtPos.node.closest(".cm-line");
+    }
+    return domAtPos.node.parentElement?.closest(".cm-line") ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function getFloatingToolbarState(
   view: EditorView,
   container: HTMLElement,
@@ -211,43 +257,38 @@ export function MarkdownSourceEditor() {
   const scrollPositionIntoView = (view: EditorView, pos: number, align: "start" | "center") => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const domAtPos = view.domAtPos(pos);
-    const lineElement = (
-      domAtPos.node instanceof HTMLElement
-        ? domAtPos.node.closest(".cm-line")
-        : domAtPos.node.parentElement?.closest(".cm-line")
-    ) as HTMLElement | null;
 
+    const lineElement = findLineElementAtPos(view, pos);
     if (lineElement) {
-      lineElement.scrollIntoView({
-        block: align === "center" ? "center" : "start",
-        inline: "nearest",
-        behavior: "smooth",
-      });
+      const containerRect = container.getBoundingClientRect();
+      const lineRect = lineElement.getBoundingClientRect();
+      const currentTop = container.scrollTop;
+      const targetTop = align === "center"
+        ? currentTop + (lineRect.top - containerRect.top) - (container.clientHeight / 2) + (lineRect.height / 2)
+        : currentTop + (lineRect.top - containerRect.top) - 72;
+      const nextTop = Math.max(0, targetTop);
+      container.scrollTop = nextTop;
+      latestRefs.current.updateEditorViewport({ scrollTop: nextTop });
+      return;
     }
 
-    const lineBlock = view.lineBlockAt(pos);
     const sampleLine = hostRef.current?.querySelector(".cm-line");
     const sampleLineHeight = sampleLine
       ? Number.parseFloat(window.getComputedStyle(sampleLine).lineHeight)
       : NaN;
     const lineHeight = Number.isFinite(sampleLineHeight) && sampleLineHeight > 0
       ? sampleLineHeight
-      : (lineBlock.height || 28);
-    const lineNumber = view.state.doc.lineAt(pos).number;
-    const estimatedTop = Math.max(lineBlock.top, (lineNumber - 1) * lineHeight);
-    const margin = 96;
-    const targetTop = Math.max(0, align === "center"
-      ? estimatedTop - (container.clientHeight / 2) + (lineHeight / 2)
-      : estimatedTop - margin);
+      : 28;
+    const targetTop = estimateScrollTopForPosition(
+      view.state.doc.toString(),
+      pos,
+      lineHeight,
+      container.clientHeight,
+      align,
+    );
 
-    requestAnimationFrame(() => {
-      if (Math.abs(container.scrollTop - targetTop) < 2) return;
-      container.scrollTo({
-        top: targetTop,
-        behavior: "smooth",
-      });
-    });
+    container.scrollTop = targetTop;
+    latestRefs.current.updateEditorViewport({ scrollTop: targetTop });
   };
 
   const focusEditorPosition = (pos: number) => {

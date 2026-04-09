@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDocumentStore } from "../../stores/document.store";
 import { useTabStore } from "../../stores/tab.store.js";
+import { useTreeStore } from "../../stores/tree.store";
+import { useUIStore } from "../../stores/ui.store";
 
 interface TabContextMenuState {
   path: string;
@@ -59,6 +61,9 @@ export function EditorTabs() {
   const currentDoc = useDocumentStore((s) => s.currentDoc);
   const isDirty = useDocumentStore((s) => s.isDirty);
   const sessionsByPath = useDocumentStore((s) => s.sessionsByPath);
+  const deleteDocument = useTreeStore((s) => s.deleteNode);
+  const outlineOpen = useUIStore((s) => s.outlineOpen);
+  const toggleOutline = useUIStore((s) => s.toggleOutline);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [draggedPath, setDraggedPath] = useState<string | null>(null);
@@ -128,13 +133,14 @@ export function EditorTabs() {
   return (
     <div
       ref={containerRef}
-      className="relative h-10 shrink-0 border-b overflow-x-auto overflow-y-hidden"
+      className="relative h-10 shrink-0 border-b flex items-stretch min-w-0"
       style={{
         background: "var(--color-surface-1)",
         borderColor: "var(--color-border)",
       }}
     >
-      <div className="min-w-max h-full flex items-stretch px-2">
+      <div className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden">
+        <div className="min-w-max h-full flex items-stretch">
         {openTabs.map((tab, index) => {
           const isActive = tab.path === activeTabPath;
           const title = titleByPath.get(tab.path) ?? tab.title;
@@ -234,6 +240,46 @@ export function EditorTabs() {
             </div>
           );
         })}
+        </div>
+      </div>
+
+      <div
+        className="shrink-0 h-full flex items-center gap-1 px-2"
+        style={{
+          borderLeft: "1px solid color-mix(in srgb, var(--color-border) 80%, transparent)",
+          background: "var(--color-surface-1)",
+        }}
+      >
+        <button
+          type="button"
+          className="ui-icon-button w-7 h-7"
+          style={{
+            color: outlineOpen ? "var(--color-accent)" : "var(--color-text-muted)",
+            background: outlineOpen ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+          }}
+          onClick={toggleOutline}
+          title={outlineOpen ? "개요 닫기" : "개요 열기"}
+          aria-label={outlineOpen ? "개요 닫기" : "개요 열기"}
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+            <path d="M3 4H13" />
+            <path d="M5 8H13" />
+            <path d="M7 12H13" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          className="ui-button ui-button--header h-7 px-2 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+          onClick={() => {
+            if (!currentPath) return;
+            void deleteDocument(currentPath);
+          }}
+          disabled={!currentPath}
+        >
+          삭제
+        </button>
       </div>
 
       {menu ? (

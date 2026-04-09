@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type PersonalAccessToken } from "../../api/client";
 import { useUIStore } from "../../stores/ui.store";
 import { useAuthStore } from "../../stores/auth.store";
 import { darkThemes, lightThemes } from "../../lib/themes";
+import { useDialog } from "../../hooks/useDialog";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -36,6 +37,12 @@ export function SettingsPage() {
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const createInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useDialog<HTMLDivElement>({
+    open: true,
+    onClose: closeSettings,
+    initialFocusRef: createInputRef,
+  });
 
   const loadTokens = async () => {
     try {
@@ -95,10 +102,17 @@ export function SettingsPage() {
 
   return (
     <div className="settings-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeSettings(); }}>
-      <div className="settings-panel">
+      <div
+        ref={panelRef}
+        className="settings-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        tabIndex={-1}
+      >
         {/* Header */}
         <div className="settings-header">
-          <h2 className="settings-title">설정</h2>
+          <h2 id="settings-title" className="settings-title">설정</h2>
           <button
             type="button"
             className="settings-close"
@@ -188,17 +202,20 @@ export function SettingsPage() {
             <div className="settings-card">
               <div className="settings-token-create">
                 <input
+                  ref={createInputRef}
                   type="text"
+                  name="tokenName"
+                  autoComplete="off"
                   value={newTokenName}
                   onChange={(e) => setNewTokenName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
                   placeholder="토큰 이름 (예: claude-desktop)"
-                  className="settings-input"
+                  className="settings-input ui-input"
                   disabled={creating}
                 />
                 <button
                   type="button"
-                  className="settings-btn settings-btn--primary"
+                  className="settings-btn settings-btn--primary ui-button ui-button--primary"
                   onClick={() => void handleCreate()}
                   disabled={creating || !newTokenName.trim()}
                 >
@@ -221,7 +238,7 @@ export function SettingsPage() {
                     <code className="settings-token-created__code">{createdToken}</code>
                     <button
                       type="button"
-                      className="settings-btn settings-btn--small"
+                      className="settings-btn settings-btn--small ui-button"
                       onClick={() => void handleCopy()}
                     >
                       {copied ? "복사됨" : "복사"}
@@ -260,7 +277,7 @@ export function SettingsPage() {
                       </div>
                       <button
                         type="button"
-                        className="settings-btn settings-btn--danger"
+                        className="settings-btn settings-btn--danger ui-button ui-button--danger"
                         onClick={() => void handleRevoke(token.id)}
                         disabled={revokingId === token.id}
                       >

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type TemplateMeta } from "../../api/client";
+import { useDialog } from "../../hooks/useDialog";
 
 const NEW_TEMPLATE_CONTENT = `---
 title: "{{title}}"
@@ -27,6 +28,8 @@ export function TemplateManagerModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useDialog<HTMLDivElement>({ open, onClose, initialFocusRef: nameInputRef });
 
   const canDelete = useMemo(() => !isCreating && selectedName !== "default" && !!selectedName, [isCreating, selectedName]);
 
@@ -114,24 +117,28 @@ export function TemplateManagerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" style={{ background: "rgba(4, 6, 10, 0.78)" }}>
+    <div className="ui-dialog-backdrop z-[60]" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
       <div
-        className="w-full max-w-5xl rounded-2xl border overflow-hidden shadow-2xl animate-scale-in"
-        style={{
-          background: "var(--color-surface-1)",
-          borderColor: "var(--color-border)",
-        }}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="template-manager-title"
+        className="ui-dialog-panel w-full max-w-5xl animate-scale-in"
+        data-dialog-tone="wide"
+        tabIndex={-1}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--color-border)" }}>
+        <div className="ui-dialog-header">
           <div>
-            <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            <h2 id="template-manager-title" className="ui-dialog-heading">
               템플릿 관리
             </h2>
-            <p className="text-xs mt-1" style={{ color: "var(--color-text-secondary)" }}>
+            <p className="ui-dialog-description">
               <code>{"{{title}}"}</code>, <code>{"{{author}}"}</code>, <code>{"{{date}}"}</code> 변수를 사용할 수 있습니다.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg" style={{ color: "var(--color-text-muted)" }}>
+          <button type="button" onClick={onClose} className="ui-icon-button" aria-label="닫기">
             ×
           </button>
         </div>
@@ -147,11 +154,7 @@ export function TemplateManagerModal({
                 setContent(NEW_TEMPLATE_CONTENT);
                 setError("");
               }}
-              className="w-full h-10 rounded-xl text-sm mb-3"
-              style={{
-                background: "var(--color-accent)",
-                color: "#111318",
-              }}
+              className="ui-button ui-button--solid w-full text-sm mb-3"
             >
               새 템플릿
             </button>
@@ -176,34 +179,37 @@ export function TemplateManagerModal({
           </aside>
 
           <div className="p-5 space-y-4">
-            <label className="block">
-              <span className="block text-[11px] uppercase tracking-wider mb-2" style={{ color: "var(--color-text-tertiary)" }}>
+            <label className="ui-field">
+              <span className="ui-label">
                 Template Name
               </span>
               <input
+                ref={nameInputRef}
+                id="template-name"
+                name="templateName"
+                autoComplete="off"
                 value={draftName}
                 disabled={!isCreating}
                 onChange={(event) => setDraftName(event.target.value.trim().replace(/\.md$/i, ""))}
                 placeholder="meeting-note"
-                className="w-full h-11 px-3 rounded-xl text-sm outline-none"
+                className="ui-input text-sm"
                 style={{
-                  background: "var(--color-surface-3)",
-                  color: "var(--color-text-primary)",
-                  border: "1px solid var(--color-border)",
                   opacity: isCreating ? 1 : 0.7,
                 }}
               />
             </label>
 
-            <label className="block">
-              <span className="block text-[11px] uppercase tracking-wider mb-2" style={{ color: "var(--color-text-tertiary)" }}>
+            <label className="ui-field">
+              <span className="ui-label">
                 Template Markdown
               </span>
               <textarea
+                id="template-content"
+                name="templateContent"
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 spellCheck={false}
-                className="w-full min-h-[320px] px-4 py-3 rounded-2xl text-sm outline-none resize-none"
+                className="ui-textarea w-full min-h-[320px] rounded-2xl text-sm resize-none"
                 style={{
                   background: "var(--color-surface-0)",
                   color: "var(--color-text-primary)",
@@ -229,10 +235,8 @@ export function TemplateManagerModal({
                   type="button"
                   onClick={handleDelete}
                   disabled={!canDelete || saving}
-                  className="px-4 h-10 rounded-xl text-sm"
+                  className="ui-button ui-button--danger text-sm"
                   style={{
-                    background: "var(--color-surface-3)",
-                    color: canDelete ? "var(--color-danger)" : "var(--color-text-muted)",
                     opacity: !canDelete || saving ? 0.6 : 1,
                   }}
                 >
@@ -242,12 +246,7 @@ export function TemplateManagerModal({
                   type="button"
                   onClick={handleSave}
                   disabled={saving || !draftName.trim() || !content.trim()}
-                  className="px-4 h-10 rounded-xl text-sm font-medium"
-                  style={{
-                    background: "var(--color-accent)",
-                    color: "#111318",
-                    opacity: saving ? 0.7 : 1,
-                  }}
+                  className="ui-button ui-button--solid text-sm font-medium"
                 >
                   {saving ? "저장 중…" : "저장"}
                 </button>

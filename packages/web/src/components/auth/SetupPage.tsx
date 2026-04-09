@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useAuthStore } from "../../stores/auth.store";
 import { BrandLockup } from "../brand/Brand";
 
@@ -9,10 +9,7 @@ export function SetupPage() {
 
   return (
     <div
-      className="h-full flex items-center justify-center"
-      style={{
-        background: "radial-gradient(circle at top, color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-0)) 0%, var(--color-surface-0) 42%)",
-      }}
+      className="ui-screen h-full flex items-center justify-center"
     >
       <div className="w-full max-w-md animate-slide-up px-4">
         <div className="mb-10">
@@ -30,11 +27,7 @@ export function SetupPage() {
 function ChooseMethod({ onSelect }: { onSelect: (step: Step) => void }) {
   return (
     <div
-      className="rounded-xl p-6"
-      style={{
-        background: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-      }}
+      className="ui-card rounded-[var(--radius-panel)] p-6"
     >
       <h2
         className="text-base font-semibold mb-1"
@@ -95,7 +88,7 @@ function ChooseMethod({ onSelect }: { onSelect: (step: Step) => void }) {
               className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
               style={{ background: "var(--color-surface-4)" }}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-green)" }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-success)" }}>
                 <rect x="1.5" y="3" width="13" height="10" rx="1.5" />
                 <path d="M5 8h6M8 5v6" />
               </svg>
@@ -148,11 +141,7 @@ function LocalSetup({ onBack }: { onBack: () => void }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl p-6"
-      style={{
-        background: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-      }}
+      className="ui-card rounded-[var(--radius-panel)] p-6"
     >
       <div className="flex items-center gap-2 mb-5">
         <button
@@ -173,10 +162,10 @@ function LocalSetup({ onBack }: { onBack: () => void }) {
         </h2>
       </div>
 
-      <SetupInput label="사용자 이름" value={username} onChange={setUsername} autoFocus required />
-      <SetupInput label="표시 이름" value={displayName} onChange={setDisplayName} placeholder="선택 사항" />
-      <SetupInput label="비밀번호" type="password" value={password} onChange={setPassword} required />
-      <SetupInput label="비밀번호 확인" type="password" value={confirmPassword} onChange={setConfirmPassword} required />
+      <SetupInput label="사용자 이름" name="username" autoComplete="username" value={username} onChange={setUsername} autoFocus required />
+      <SetupInput label="표시 이름" name="displayName" autoComplete="name" value={displayName} onChange={setDisplayName} placeholder="선택 사항" />
+      <SetupInput label="비밀번호" name="password" autoComplete="new-password" type="password" value={password} onChange={setPassword} required />
+      <SetupInput label="비밀번호 확인" name="confirmPassword" autoComplete="new-password" type="password" value={confirmPassword} onChange={setConfirmPassword} required />
 
       {error && (
         <p className="text-xs mb-4 animate-fade-in" style={{ color: "var(--color-danger)" }}>
@@ -187,12 +176,7 @@ function LocalSetup({ onBack }: { onBack: () => void }) {
       <button
         type="submit"
         disabled={loading}
-        className="w-full h-9 rounded-md text-sm font-medium transition-all duration-150"
-        style={{
-          background: loading ? "var(--color-surface-4)" : "var(--color-accent)",
-          color: loading ? "var(--color-text-muted)" : "var(--color-surface-0)",
-          cursor: loading ? "not-allowed" : "pointer",
-        }}
+        className="ui-button ui-button--solid w-full text-sm font-medium"
       >
         {loading ? "생성 중…" : "계정 생성"}
       </button>
@@ -274,11 +258,7 @@ function OidcSetup({ onBack }: { onBack: () => void }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl p-6"
-      style={{
-        background: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-      }}
+      className="ui-card rounded-[var(--radius-panel)] p-6"
     >
       <div className="flex items-center gap-2 mb-5">
         <button
@@ -299,10 +279,10 @@ function OidcSetup({ onBack }: { onBack: () => void }) {
         </h2>
       </div>
 
-      <SetupInput label="공급자 이름" value={providerName} onChange={setProviderName} placeholder="예: Authentik, Google" autoFocus required />
-      <SetupInput label="Issuer URL" value={issuer} onChange={setIssuer} placeholder="https://auth.example.com/application/o/myapp" required />
-      <SetupInput label="Client ID" value={clientId} onChange={setClientId} required />
-      <SetupInput label="Client Secret" type="password" value={clientSecret} onChange={setClientSecret} required />
+      <SetupInput label="공급자 이름" name="providerName" autoComplete="organization-title" value={providerName} onChange={setProviderName} placeholder="예: Authentik, Google" autoFocus required />
+      <SetupInput label="Issuer URL" name="issuer" autoComplete="url" value={issuer} onChange={setIssuer} placeholder="https://auth.example.com/application/o/myapp" required />
+      <SetupInput label="Client ID" name="clientId" autoComplete="off" value={clientId} onChange={setClientId} required />
+      <SetupInput label="Client Secret" name="clientSecret" autoComplete="off" type="password" value={clientSecret} onChange={setClientSecret} required />
 
       <p className="text-[11px] mb-4" style={{ color: "var(--color-text-muted)" }}>
         Redirect URI: <code className="px-1 py-0.5 rounded text-[10px]" style={{ background: "var(--color-surface-3)" }}>{window.location.origin}/auth/oidc/callback</code>
@@ -317,12 +297,7 @@ function OidcSetup({ onBack }: { onBack: () => void }) {
       <button
         type="submit"
         disabled={loading}
-        className="w-full h-9 rounded-md text-sm font-medium transition-all duration-150"
-        style={{
-          background: loading ? "var(--color-surface-4)" : "var(--color-accent)",
-          color: loading ? "var(--color-text-muted)" : "var(--color-surface-0)",
-          cursor: loading ? "not-allowed" : "pointer",
-        }}
+        className="ui-button ui-button--solid w-full text-sm font-medium"
       >
         {loading ? "연결 확인 중…" : "연결 확인 및 저장"}
       </button>
@@ -333,6 +308,8 @@ function OidcSetup({ onBack }: { onBack: () => void }) {
 function SetupInput({
   label,
   type = "text",
+  name,
+  autoComplete,
   value,
   onChange,
   placeholder,
@@ -341,37 +318,34 @@ function SetupInput({
 }: {
   label: string;
   type?: string;
+  name?: string;
+  autoComplete?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
   required?: boolean;
 }) {
+  const inputId = useId();
   return (
-    <div className="mb-4">
+    <div className="ui-field mb-4">
       <label
-        className="block text-[11px] font-medium uppercase tracking-wider mb-1.5"
-        style={{ color: "var(--color-text-tertiary)" }}
+        htmlFor={inputId}
+        className="ui-label"
       >
         {label}
       </label>
       <input
+        id={inputId}
+        name={name}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
+        autoComplete={autoComplete}
         required={required}
-        className="w-full h-9 px-3 rounded-md text-sm outline-none transition-colors"
-        style={{
-          background: "var(--color-surface-3)",
-          color: "var(--color-text-primary)",
-          border: "1px solid var(--color-border)",
-          caretColor: "var(--color-accent)",
-          fontFamily: "var(--font-ui)",
-        }}
-        onFocus={(e) => (e.currentTarget.style.borderColor = "var(--color-accent)")}
-        onBlur={(e) => (e.currentTarget.style.borderColor = "var(--color-border)")}
+        className="ui-input text-sm"
       />
     </div>
   );

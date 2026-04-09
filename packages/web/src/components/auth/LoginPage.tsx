@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { useAuthStore } from "../../stores/auth.store";
 import { BrandLockup } from "../brand/Brand";
 
@@ -19,10 +19,7 @@ export function LoginPage() {
 
   return (
     <div
-      className="h-full flex items-center justify-center px-4"
-      style={{
-        background: "radial-gradient(circle at top, color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-0)) 0%, var(--color-surface-0) 42%)",
-      }}
+      className="ui-screen h-full flex items-center justify-center px-4"
     >
       <div className="w-full max-w-sm animate-slide-up">
         <div className="mb-10">
@@ -51,6 +48,8 @@ function LocalLoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const usernameId = useId();
+  const passwordId = useId();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -67,60 +66,44 @@ function LocalLoginForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl p-6"
-      style={{
-        background: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-      }}
+      className="ui-card rounded-[var(--radius-panel)] p-6"
     >
-      <div className="mb-4">
+      <div className="ui-field mb-4">
         <label
-          className="block text-[11px] font-medium uppercase tracking-wider mb-1.5"
-          style={{ color: "var(--color-text-tertiary)" }}
+          htmlFor={usernameId}
+          className="ui-label"
         >
           Username
         </label>
         <input
+          id={usernameId}
+          name="username"
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
           autoFocus
           required
-          className="w-full h-9 px-3 rounded-md text-sm outline-none transition-colors"
-          style={{
-            background: "var(--color-surface-3)",
-            color: "var(--color-text-primary)",
-            border: "1px solid var(--color-border)",
-            caretColor: "var(--color-accent)",
-            fontFamily: "var(--font-ui)",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "var(--color-accent)")}
-          onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+          className="ui-input text-sm"
         />
       </div>
 
-      <div className="mb-5">
+      <div className="ui-field mb-5">
         <label
-          className="block text-[11px] font-medium uppercase tracking-wider mb-1.5"
-          style={{ color: "var(--color-text-tertiary)" }}
+          htmlFor={passwordId}
+          className="ui-label"
         >
           Password
         </label>
         <input
+          id={passwordId}
+          name="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
           required
-          className="w-full h-9 px-3 rounded-md text-sm outline-none transition-colors"
-          style={{
-            background: "var(--color-surface-3)",
-            color: "var(--color-text-primary)",
-            border: "1px solid var(--color-border)",
-            caretColor: "var(--color-accent)",
-            fontFamily: "var(--font-ui)",
-          }}
-          onFocus={(e) => (e.target.style.borderColor = "var(--color-accent)")}
-          onBlur={(e) => (e.target.style.borderColor = "var(--color-border)")}
+          className="ui-input text-sm"
         />
       </div>
 
@@ -133,12 +116,7 @@ function LocalLoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full h-9 rounded-md text-sm font-medium transition-all duration-150"
-        style={{
-          background: loading ? "var(--color-surface-4)" : "var(--color-accent)",
-          color: loading ? "var(--color-text-muted)" : "var(--color-surface-0)",
-          cursor: loading ? "not-allowed" : "pointer",
-        }}
+        className="ui-button ui-button--solid w-full text-sm font-medium"
       >
         {loading ? "로그인 중…" : "로그인"}
       </button>
@@ -157,22 +135,13 @@ function OidcLoginForm({ providerName }: { providerName: string }) {
 
   return (
     <div
-      className="rounded-xl p-6"
-      style={{
-        background: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-      }}
+      className="ui-card rounded-[var(--radius-panel)] p-6"
     >
       <button
         type="button"
         onClick={() => void handleClick()}
         disabled={loading}
-        className="w-full h-10 rounded-md text-sm font-medium transition-all duration-150 flex items-center justify-center gap-2"
-        style={{
-          background: loading ? "var(--color-surface-4)" : "var(--color-accent)",
-          color: loading ? "var(--color-text-muted)" : "var(--color-surface-0)",
-          cursor: loading ? "not-allowed" : "pointer",
-        }}
+        className="ui-button ui-button--solid w-full text-sm font-medium"
       >
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
           <rect x="1.5" y="3" width="13" height="10" rx="1.5" />

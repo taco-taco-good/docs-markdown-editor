@@ -17,6 +17,18 @@ export interface ThemeColors {
   danger: string;
   success: string;
   info: string;
+  warning?: string;
+}
+
+export interface ThemeChrome {
+  "radius-panel": string;
+  "radius-control": string;
+  "radius-pill": string;
+  "shadow-panel": string;
+  "shadow-floating": string;
+  "focus-ring": string;
+  "focus-ring-offset": string;
+  "overlay-backdrop": string;
 }
 
 export interface ThemeDef {
@@ -24,6 +36,59 @@ export interface ThemeDef {
   name: string;
   appearance: "dark" | "light";
   colors: ThemeColors;
+  chrome?: Partial<ThemeChrome>;
+}
+
+const DEFAULT_THEME_CHROME: Record<ThemeDef["appearance"], ThemeChrome> = {
+  dark: {
+    "radius-panel": "18px",
+    "radius-control": "12px",
+    "radius-pill": "999px",
+    "shadow-panel": "0 28px 80px rgba(0, 0, 0, 0.44)",
+    "shadow-floating": "0 18px 48px rgba(0, 0, 0, 0.34)",
+    "focus-ring": "0 0 0 3px color-mix(in srgb, var(--color-accent) 30%, transparent)",
+    "focus-ring-offset": "0 0 0 1px color-mix(in srgb, var(--color-surface-0) 82%, rgba(255,255,255,0.08))",
+    "overlay-backdrop": "rgba(4, 6, 10, 0.68)",
+  },
+  light: {
+    "radius-panel": "18px",
+    "radius-control": "12px",
+    "radius-pill": "999px",
+    "shadow-panel": "0 24px 60px rgba(24, 33, 45, 0.16)",
+    "shadow-floating": "0 16px 38px rgba(24, 33, 45, 0.12)",
+    "focus-ring": "0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent)",
+    "focus-ring-offset": "0 0 0 1px color-mix(in srgb, var(--color-surface-0) 65%, white)",
+    "overlay-backdrop": "rgba(18, 23, 30, 0.18)",
+  },
+};
+
+function resolveThemeChrome(theme: ThemeDef): ThemeChrome {
+  return {
+    ...DEFAULT_THEME_CHROME[theme.appearance],
+    ...theme.chrome,
+  };
+}
+
+function resolveThemeWarning(theme: ThemeDef): string {
+  return theme.colors.warning ?? (theme.appearance === "dark" ? "#e5c07b" : "#c88400");
+}
+
+function syncBrowserChrome(theme: ThemeDef): void {
+  const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColorMeta) {
+    themeColorMeta.content = theme.colors["surface-0"];
+  }
+
+  const iconHref = theme.appearance === "dark" ? "/brand-mark-dark-square.png" : "/brand-mark-light-square.png";
+  const iconLink = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (iconLink) {
+    iconLink.href = iconHref;
+  }
+
+  const appleIconLink = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]');
+  if (appleIconLink) {
+    appleIconLink.href = iconHref;
+  }
 }
 
 // ══════════════════════════════════════
@@ -668,7 +733,15 @@ export function resolveTheme(id: string, customThemes: ThemeDef[] = []): ThemeDe
 export function applyTheme(theme: ThemeDef): void {
   const root = document.documentElement;
   for (const [key, value] of Object.entries(theme.colors)) {
-    root.style.setProperty(`--color-${key}`, value);
+    if (value) {
+      root.style.setProperty(`--color-${key}`, value);
+    }
+  }
+  root.style.setProperty("--color-warning", resolveThemeWarning(theme));
+  for (const [key, value] of Object.entries(resolveThemeChrome(theme))) {
+    root.style.setProperty(`--${key}`, value);
   }
   root.setAttribute("data-appearance", theme.appearance);
+  root.style.colorScheme = theme.appearance;
+  syncBrowserChrome(theme);
 }

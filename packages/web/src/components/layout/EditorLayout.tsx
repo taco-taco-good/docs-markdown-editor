@@ -1,5 +1,4 @@
 import { useDocumentStore } from "../../stores/document.store";
-import { EditorToolbar } from "../editor/EditorToolbar";
 import { MarkdownSourceEditor } from "../editor/MarkdownSourceEditor";
 import { EditorTabs } from "./EditorTabs";
 
@@ -12,7 +11,6 @@ export function EditorLayout() {
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <EditorTabs />
-      <EditorToolbar />
       <div className="flex-1 flex min-h-0 relative">
         <div
           className="flex-1 min-h-0"
