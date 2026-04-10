@@ -61,6 +61,10 @@ def get_document_raw(session: Session, doc_path: str) -> str:
   return document["raw"]
 
 
+def get_workspace_info(session: Session) -> dict:
+  return request_json(session, "/api/info")
+
+
 def create_page(context, session: Session, doc_path: str):
   context.add_cookies([{
     "name": "session_id",
@@ -605,6 +609,106 @@ def case_desktop_tabs_restore(session: Session, suffix: str) -> None:
   assert_no_runtime_issues(issues, "desktop-tabs-restore")
 
 
+def case_internal_absolute_path_link(session: Session, suffix: str) -> None:
+  workspace = get_workspace_info(session)
+  workspace_root = workspace["workspaceRoot"].rstrip("/\\")
+  target_path = f"need-organizing/today/20260309 Mon {suffix}.md"
+  source_path = f"logs/2026-03/2026-03-09-{suffix}.md"
+  absolute_target = f"{workspace_root}/{target_path}".replace("\\", "/")
+
+  upsert_document(
+    session,
+    target_path,
+    "\n".join([
+      f"# 20260309 Mon {suffix}",
+      "",
+      "target body",
+      "",
+    ]),
+  )
+  upsert_document(
+    session,
+    source_path,
+    "\n".join([
+      "# 2026-03-09",
+      "",
+      f"- 원본: [`20260309 Mon.md`]({absolute_target.replace(' ', '%20')})",
+      "",
+    ]),
+  )
+
+  with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context(viewport={"width": 1440, "height": 960})
+    page = create_page(context, session, source_path)
+    issues = collect_page_issues(page)
+
+    page.locator(".cm-md-link-widget").first.click()
+    page.wait_for_timeout(1200)
+
+    tabs = page.locator("[data-tab-activate]").all_inner_texts()
+    body_text = page.locator("body").inner_text()
+    browser.close()
+
+  assert any(f"20260309 Mon {suffix}.md" in tab for tab in tabs), (
+    f"[internal-absolute-path-link] expected target tab after click, got {tabs}"
+  )
+  assert f"20260309 Mon {suffix}" in body_text, (
+    "[internal-absolute-path-link] expected target document content to render after click"
+  )
+  assert_no_runtime_issues(issues, "internal-absolute-path-link")
+
+
+def case_complex_outline_open(session: Session, suffix: str) -> None:
+  doc_path = f"need-organizing/outline/weekly-outline-{suffix}.md"
+  upsert_document(
+    session,
+    doc_path,
+    "\n".join([
+      "---",
+      'title: "weekly-outline"',
+      "tags: []",
+      'date: "2026-03-22"',
+      "---",
+      "[Skip navigation](https://outline.example.com/doc/abc#skip-nav)",
+      "",
+      "### ",
+      "",
+      "### ",
+      "",
+      "### ",
+      "",
+      "**주간보고 및 진행 메모**",
+      "",
+      "### **20260129**",
+      "",
+      "- gtest 도입",
+      "- script test 어떻게 cmake로 할지",
+      "",
+      "### **20251204 회의 (팀장회의)**",
+      "",
+      "Jam check",
+      "",
+      "- [configure.ac](http://configure.ac)와 autoconf 정합성 확인 필요",
+      "",
+    ]),
+  )
+
+  with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context(viewport={"width": 1440, "height": 960})
+    page = create_page(context, session, doc_path)
+    issues = collect_page_issues(page)
+    page.wait_for_timeout(800)
+    body_text = page.locator("body").inner_text()
+    browser.close()
+
+  assert "주간보고 및 진행 메모" in body_text, (
+    "[complex-outline-open] expected complex imported markdown to render"
+  )
+  assert_no_runtime_issues(issues, "complex-outline-open")
+
+
 CASES: dict[str, Callable[[Session, str], None]] = {
   "rich-preview-open": case_rich_preview_open,
   "outline-scroll": case_outline_scroll,
@@ -616,6 +720,8 @@ CASES: dict[str, Callable[[Session, str], None]] = {
   "desktop-tabs-restore": case_desktop_tabs_restore,
   "desktop-multiline-delete": case_desktop_multiline_delete,
   "desktop-external-link-click": case_desktop_external_link_click,
+  "internal-absolute-path-link": case_internal_absolute_path_link,
+  "complex-outline-open": case_complex_outline_open,
 }
 
 DEFAULT_CASES = [
@@ -626,6 +732,8 @@ DEFAULT_CASES = [
   "desktop-tabs-restore",
   "desktop-multiline-delete",
   "desktop-external-link-click",
+  "internal-absolute-path-link",
+  "complex-outline-open",
 ]
 
 

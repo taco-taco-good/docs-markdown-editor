@@ -3,6 +3,7 @@ import { api, type TreeDropTarget, type TreeMoveResult, type TreeNode } from "..
 import { useDocumentStore } from "./document.store";
 import { useTabStore } from "./tab.store.js";
 import { remapMovedPath } from "../lib/path-utils";
+import { expandAncestorPaths } from "../lib/tree-selection";
 
 interface TreeStore {
   nodes: TreeNode[];
@@ -76,7 +77,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     set({ expandedPaths: expanded });
   },
 
-  selectPath: (path) => set({ selectedPath: path }),
+  selectPath: (path) => set((state) => ({
+    selectedPath: path,
+    expandedPaths: path ? expandAncestorPaths(state.expandedPaths, path) : state.expandedPaths,
+  })),
 
   createFile: async (dirPath, name, opts) => {
     const fullPath = dirPath ? `${dirPath}/${name}` : name;
@@ -85,10 +89,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       frontmatter: opts?.title ? { title: opts.title } : undefined,
     });
     await get().loadTree();
-    const expanded = new Set(get().expandedPaths);
-    if (dirPath) {
-      expanded.add(dirPath);
-    }
+    const expanded = expandAncestorPaths(new Set(get().expandedPaths), fullPath);
     set({ expandedPaths: expanded, selectedPath: fullPath });
     return fullPath;
   },
@@ -98,10 +99,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     const fullPath = dirPath ? `${dirPath}/${normalizedName}` : normalizedName;
     await api.createDirectory(fullPath);
     await get().loadTree();
-    const expanded = new Set(get().expandedPaths);
-    if (dirPath) {
-      expanded.add(dirPath);
-    }
+    const expanded = expandAncestorPaths(new Set(get().expandedPaths), fullPath);
     expanded.add(fullPath);
     set({ expandedPaths: expanded, selectedPath: fullPath });
     return fullPath;

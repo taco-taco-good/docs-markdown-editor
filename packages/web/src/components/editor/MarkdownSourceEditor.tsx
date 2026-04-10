@@ -316,23 +316,28 @@ export function MarkdownSourceEditor() {
     const path = latestRefs.current.currentPath;
     if (!path) return;
 
-    const target = resolveEditorReferenceTarget(path, url);
-    if (!target) return;
+    void (async () => {
+      const workspaceRoot = url.trim().startsWith("/")
+        ? await api.getWorkspaceInfo().then((info) => info.workspaceRoot).catch(() => undefined)
+        : undefined;
+      const target = resolveEditorReferenceTarget(path, url, workspaceRoot);
+      if (!target) return;
 
-    if (target.type === "external") {
-      window.open(target.url, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    if (target.path === path) {
-      if (target.anchor) {
-        navigateToAnchor(target.anchor);
+      if (target.type === "external") {
+        window.open(target.url, "_blank", "noopener,noreferrer");
+        return;
       }
-      return;
-    }
 
-    pendingNavigationRef.current = { path: target.path, anchor: target.anchor };
-    void useDocumentStore.getState().openDocument(target.path);
+      if (target.path === path) {
+        if (target.anchor) {
+          navigateToAnchor(target.anchor);
+        }
+        return;
+      }
+
+      pendingNavigationRef.current = { path: target.path, anchor: target.anchor };
+      await useDocumentStore.getState().openDocument(target.path);
+    })();
   };
 
   useEffect(() => {

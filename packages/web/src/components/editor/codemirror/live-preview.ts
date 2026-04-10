@@ -1,27 +1,35 @@
-import { EditorState, RangeSetBuilder, StateField, type Transaction } from "@codemirror/state";
+import { EditorState, StateField, type Range, type Transaction } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
   WidgetType,
 } from "@codemirror/view";
-import { toggleTaskCheckboxAtLine } from "./commands";
-import { createTableElement } from "./table-render";
+import { toggleTaskCheckboxAtLine } from "./commands.js";
+import { createTableElement } from "./table-render.js";
 import {
   didActiveLinesChange,
   isCompositionTransaction,
   shouldHideRange,
   shouldRenderIndentWidget,
   shouldRenderWidget,
-} from "./stability";
+} from "./stability.js";
+import { collectProtectedRanges, rangesOverlap } from "./live-preview-ranges.js";
 
 class LinkWidget extends WidgetType {
+  private readonly label: string;
+  private readonly url: string;
+  private readonly onActivate: (url: string) => void;
+
   constructor(
-    private readonly label: string,
-    private readonly url: string,
-    private readonly onActivate: (url: string) => void,
+    label: string,
+    url: string,
+    onActivate: (url: string) => void,
   ) {
     super();
+    this.label = label;
+    this.url = url;
+    this.onActivate = onActivate;
   }
 
   eq(other: LinkWidget): boolean {
@@ -57,12 +65,19 @@ class LinkWidget extends WidgetType {
 }
 
 class MentionWidget extends WidgetType {
+  private readonly label: string;
+  private readonly reference: string;
+  private readonly onActivate: (url: string) => void;
+
   constructor(
-    private readonly label: string,
-    private readonly reference: string,
-    private readonly onActivate: (url: string) => void,
+    label: string,
+    reference: string,
+    onActivate: (url: string) => void,
   ) {
     super();
+    this.label = label;
+    this.reference = reference;
+    this.onActivate = onActivate;
   }
 
   eq(other: MentionWidget): boolean {
@@ -90,11 +105,16 @@ class MentionWidget extends WidgetType {
 }
 
 class TaskCheckboxWidget extends WidgetType {
+  private readonly checked: boolean;
+  private readonly lineFrom: number;
+
   constructor(
-    private readonly checked: boolean,
-    private readonly lineFrom: number,
+    checked: boolean,
+    lineFrom: number,
   ) {
     super();
+    this.checked = checked;
+    this.lineFrom = lineFrom;
   }
 
   eq(other: TaskCheckboxWidget): boolean {
@@ -137,8 +157,11 @@ class HorizontalRuleWidget extends WidgetType {
 }
 
 class BulletListWidget extends WidgetType {
-  constructor(private readonly orderedLabel?: string) {
+  private readonly orderedLabel?: string;
+
+  constructor(orderedLabel?: string) {
     super();
+    this.orderedLabel = orderedLabel;
   }
 
   eq(other: BulletListWidget): boolean {
@@ -158,8 +181,11 @@ class BulletListWidget extends WidgetType {
 }
 
 class IndentWidget extends WidgetType {
-  constructor(private readonly depth: number) {
+  private readonly depth: number;
+
+  constructor(depth: number) {
     super();
+    this.depth = depth;
   }
 
   eq(other: IndentWidget): boolean {
@@ -177,14 +203,25 @@ class IndentWidget extends WidgetType {
 }
 
 class TableWidget extends WidgetType {
+  private readonly markdown: string;
+  private readonly currentPath: string;
+  private readonly from: number;
+  private readonly onLinkActivate: (url: string) => void;
+  private readonly onActivateTable: (pos: number) => void;
+
   constructor(
-    private readonly markdown: string,
-    private readonly currentPath: string,
-    private readonly from: number,
-    private readonly onLinkActivate: (url: string) => void,
-    private readonly onActivateTable: (pos: number) => void,
+    markdown: string,
+    currentPath: string,
+    from: number,
+    onLinkActivate: (url: string) => void,
+    onActivateTable: (pos: number) => void,
   ) {
     super();
+    this.markdown = markdown;
+    this.currentPath = currentPath;
+    this.from = from;
+    this.onLinkActivate = onLinkActivate;
+    this.onActivateTable = onActivateTable;
   }
 
   eq(other: TableWidget): boolean {
@@ -205,31 +242,40 @@ class TableWidget extends WidgetType {
   }
 }
 
-function hideRangeIfSafe(builder: RangeSetBuilder<Decoration>, state: EditorState, from: number, to: number): void {
+function pushDecoration(
+  ranges: Range<Decoration>[],
+  from: number,
+  to: number,
+  decoration: Decoration,
+): void {
+  ranges.push(decoration.range(from, to));
+}
+
+function hideRangeIfSafe(ranges: Range<Decoration>[], state: EditorState, from: number, to: number): void {
   if (!shouldHideRange(state, from, to)) return;
-  builder.add(from, to, Decoration.replace({}));
+  pushDecoration(ranges, from, to, Decoration.replace({}));
 }
 
 function widgetRangeIfSafe(
-  builder: RangeSetBuilder<Decoration>,
+  ranges: Range<Decoration>[],
   state: EditorState,
   from: number,
   to: number,
   widget: WidgetType,
 ): void {
   if (!shouldRenderWidget(state, from, to)) return;
-  builder.add(from, to, Decoration.replace({ widget }));
+  pushDecoration(ranges, from, to, Decoration.replace({ widget }));
 }
 
 function indentRangeIfSafe(
-  builder: RangeSetBuilder<Decoration>,
+  ranges: Range<Decoration>[],
   state: EditorState,
   from: number,
   to: number,
   depth: number,
 ): void {
   if (!shouldRenderIndentWidget(state, from, to)) return;
-  builder.add(from, to, Decoration.replace({ widget: new IndentWidget(depth) }));
+  pushDecoration(ranges, from, to, Decoration.replace({ widget: new IndentWidget(depth) }));
 }
 
 function indentDepth(spaces: string): number {
@@ -237,7 +283,7 @@ function indentDepth(spaces: string): number {
 }
 
 function addMarkForSelectionIntersections(
-  builder: RangeSetBuilder<Decoration>,
+  ranges: Range<Decoration>[],
   state: EditorState,
   from: number,
   to: number,
@@ -248,7 +294,7 @@ function addMarkForSelectionIntersections(
     const markFrom = Math.max(from, range.from);
     const markTo = Math.min(to, range.to);
     if (markFrom < markTo) {
-      builder.add(markFrom, markTo, Decoration.mark({ class: className }));
+      pushDecoration(ranges, markFrom, markTo, Decoration.mark({ class: className }));
     }
   }
 }
@@ -271,7 +317,7 @@ function buildDecorations(
     onActivateTable: (pos: number) => void;
   },
 ): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
+  const ranges: Range<Decoration>[] = [];
   let inCodeBlock = false;
 
   // Detect YAML frontmatter: starts with --- on line 1, ends with --- or ...
@@ -298,15 +344,15 @@ function buildDecorations(
     const fenceMatch = /^(```|~~~)(.*)$/.exec(text);
 
     if (fenceMatch) {
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--code-fence" } }));
-      addMarkForSelectionIntersections(builder, state, line.from, line.to, "cm-md-code-selection");
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--code-fence" } }));
+      addMarkForSelectionIntersections(ranges, state, line.from, line.to, "cm-md-code-selection");
       inCodeBlock = !inCodeBlock;
       continue;
     }
 
     if (inCodeBlock) {
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--code" } }));
-      addMarkForSelectionIntersections(builder, state, line.from, line.to, "cm-md-code-selection");
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--code" } }));
+      addMarkForSelectionIntersections(ranges, state, line.from, line.to, "cm-md-code-selection");
       continue;
     }
 
@@ -323,7 +369,7 @@ function buildDecorations(
       const tableEnd = state.doc.line(tableEndLineNumber).to;
       const tableMarkdown = state.sliceDoc(tableStart, tableEnd);
       if (shouldRenderWidget(state, tableStart, tableEnd)) {
-        builder.add(tableStart, tableEnd, Decoration.replace({
+        pushDecoration(ranges, tableStart, tableEnd, Decoration.replace({
           widget: new TableWidget(
             tableMarkdown,
             options.currentPath,
@@ -336,7 +382,7 @@ function buildDecorations(
       } else {
         for (let tableLine = lineNumber; tableLine <= tableEndLineNumber; tableLine += 1) {
           const currentLine = state.doc.line(tableLine);
-          builder.add(currentLine.from, currentLine.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--table" } }));
+          pushDecoration(ranges, currentLine.from, currentLine.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--table" } }));
         }
       }
       lineNumber = tableEndLineNumber;
@@ -344,35 +390,38 @@ function buildDecorations(
     }
 
     if (/^\s*((?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})\s*$/.test(text)) {
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--hr" } }));
-      widgetRangeIfSafe(builder, state, line.from, line.to, new HorizontalRuleWidget());
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--hr" } }));
+      widgetRangeIfSafe(ranges, state, line.from, line.to, new HorizontalRuleWidget());
       continue;
     }
+
+    const protectedRanges = collectProtectedRanges(text, line.from);
 
     const heading = /^(#{1,6})\s+(.+)$/.exec(text);
     if (heading) {
       const prefixLength = heading[1].length + 1;
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: `cm-md-line cm-md-line--heading cm-md-line--h${heading[1].length}` } }));
-      hideRangeIfSafe(builder, state, line.from, line.from + prefixLength);
-      builder.add(line.from + prefixLength, line.to, Decoration.mark({ class: "cm-md-inline cm-md-inline--heading" }));
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: `cm-md-line cm-md-line--heading cm-md-line--h${heading[1].length}` } }));
+      hideRangeIfSafe(ranges, state, line.from, line.from + prefixLength);
+      pushDecoration(ranges, line.from + prefixLength, line.to, Decoration.mark({ class: "cm-md-inline cm-md-inline--heading" }));
+      protectedRanges.push({ from: line.from + prefixLength, to: line.to });
     }
 
     const quote = /^(>\s+)/.exec(text);
     if (quote) {
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--quote" } }));
-      hideRangeIfSafe(builder, state, line.from, line.from + quote[1].length);
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--quote" } }));
+      hideRangeIfSafe(ranges, state, line.from, line.from + quote[1].length);
     }
 
     const task = /^(\s*)-\s\[([ xX])\]\s+/.exec(text);
     if (task) {
-      builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--task" } }));
+      pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--task" } }));
       if (task[1].length > 0) {
-        indentRangeIfSafe(builder, state, line.from, line.from + task[1].length, indentDepth(task[1]));
+        indentRangeIfSafe(ranges, state, line.from, line.from + task[1].length, indentDepth(task[1]));
       }
       const markerFrom = line.from + task[1].length;
       const markerTo = line.from + task[0].length;
       widgetRangeIfSafe(
-        builder,
+        ranges,
         state,
         markerFrom,
         markerTo,
@@ -381,53 +430,31 @@ function buildDecorations(
     } else {
       const bullet = /^(\s*)([-+*])\s+/.exec(text);
       if (bullet) {
-        builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--list cm-md-line--bullet" } }));
+        pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--list cm-md-line--bullet" } }));
         if (bullet[1].length > 0) {
-          indentRangeIfSafe(builder, state, line.from, line.from + bullet[1].length, indentDepth(bullet[1]));
+          indentRangeIfSafe(ranges, state, line.from, line.from + bullet[1].length, indentDepth(bullet[1]));
         }
         const markerFrom = line.from + bullet[1].length;
         const markerTo = markerFrom + bullet[0].length - bullet[1].length;
-        widgetRangeIfSafe(builder, state, markerFrom, markerTo, new BulletListWidget());
+        widgetRangeIfSafe(ranges, state, markerFrom, markerTo, new BulletListWidget());
       } else {
         const ordered = /^(\s*)(\d+\.)\s+/.exec(text);
         if (ordered) {
-          builder.add(line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--list cm-md-line--ordered" } }));
+          pushDecoration(ranges, line.from, line.from, Decoration.line({ attributes: { class: "cm-md-line cm-md-line--list cm-md-line--ordered" } }));
           if (ordered[1].length > 0) {
-            indentRangeIfSafe(builder, state, line.from, line.from + ordered[1].length, indentDepth(ordered[1]));
+            indentRangeIfSafe(ranges, state, line.from, line.from + ordered[1].length, indentDepth(ordered[1]));
           }
           const markerFrom = line.from + ordered[1].length;
           const markerTo = markerFrom + ordered[0].length - ordered[1].length;
-          widgetRangeIfSafe(builder, state, markerFrom, markerTo, new BulletListWidget(ordered[2]));
+          widgetRangeIfSafe(ranges, state, markerFrom, markerTo, new BulletListWidget(ordered[2]));
         }
       }
     }
 
-    for (const match of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
-      const start = line.from + (match.index ?? 0);
-      hideRangeIfSafe(builder, state, start, start + 2);
-      builder.add(start + 2, start + 2 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--strong" }));
-      hideRangeIfSafe(builder, state, start + 2 + match[1].length, start + 4 + match[1].length);
-    }
-
-    for (const match of text.matchAll(/`([^`\n]+)`/g)) {
-      const start = line.from + (match.index ?? 0);
-      hideRangeIfSafe(builder, state, start, start + 1);
-      builder.add(start + 1, start + 1 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--code" }));
-      hideRangeIfSafe(builder, state, start + 1 + match[1].length, start + 2 + match[1].length);
-    }
-
-    for (const match of text.matchAll(/~~([^~\n]+)~~/g)) {
-      const start = line.from + (match.index ?? 0);
-      hideRangeIfSafe(builder, state, start, start + 2);
-      builder.add(start + 2, start + 2 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--strike" }));
-      hideRangeIfSafe(builder, state, start + 2 + match[1].length, start + 4 + match[1].length);
-    }
-
     for (const match of text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
       const start = line.from + (match.index ?? 0);
-      const label = match[1];
       const end = start + match[0].length;
-      widgetRangeIfSafe(builder, state, start, end, new LinkWidget(label, match[2], options.onLinkActivate));
+      widgetRangeIfSafe(ranges, state, start, end, new LinkWidget(match[1], match[2], options.onLinkActivate));
     }
 
     for (const match of text.matchAll(/(^|[\s([{"'])@([\p{Letter}\p{Number}./_-]+(?:#[\p{Letter}\p{Number}./_-]+)?)/gu)) {
@@ -435,11 +462,38 @@ function buildDecorations(
       const start = line.from + (match.index ?? 0) + prefix.length;
       const reference = `@${match[2]}`;
       const end = start + reference.length;
-      widgetRangeIfSafe(builder, state, start, end, new MentionWidget(match[2], reference, options.onLinkActivate));
+      widgetRangeIfSafe(ranges, state, start, end, new MentionWidget(match[2], reference, options.onLinkActivate));
+    }
+
+    for (const match of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
+      const start = line.from + (match.index ?? 0);
+      const end = start + match[0].length;
+      if (rangesOverlap(start, end, protectedRanges)) continue;
+      hideRangeIfSafe(ranges, state, start, start + 2);
+      pushDecoration(ranges, start + 2, start + 2 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--strong" }));
+      hideRangeIfSafe(ranges, state, start + 2 + match[1].length, start + 4 + match[1].length);
+    }
+
+    for (const match of text.matchAll(/`([^`\n]+)`/g)) {
+      const start = line.from + (match.index ?? 0);
+      const end = start + match[0].length;
+      if (rangesOverlap(start, end, protectedRanges)) continue;
+      hideRangeIfSafe(ranges, state, start, start + 1);
+      pushDecoration(ranges, start + 1, start + 1 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--code" }));
+      hideRangeIfSafe(ranges, state, start + 1 + match[1].length, start + 2 + match[1].length);
+    }
+
+    for (const match of text.matchAll(/~~([^~\n]+)~~/g)) {
+      const start = line.from + (match.index ?? 0);
+      const end = start + match[0].length;
+      if (rangesOverlap(start, end, protectedRanges)) continue;
+      hideRangeIfSafe(ranges, state, start, start + 2);
+      pushDecoration(ranges, start + 2, start + 2 + match[1].length, Decoration.mark({ class: "cm-md-inline cm-md-inline--strike" }));
+      hideRangeIfSafe(ranges, state, start + 2 + match[1].length, start + 4 + match[1].length);
     }
   }
 
-  return builder.finish();
+  return Decoration.set(ranges, true);
 }
 
 export function markdownLivePreview(options: {

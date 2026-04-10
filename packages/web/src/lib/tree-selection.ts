@@ -1,22 +1,14 @@
-function parentDirectoryFromPath(path: string): string {
-  const segments = path.split("/");
-  segments.pop();
-  return segments.join("/");
-}
-
-export function resolveTargetDirectory(
-  selectedPath: string | null,
-  currentDocumentPath: string | null,
-): string {
-  const preferredPath = selectedPath ?? currentDocumentPath;
-  if (!preferredPath) return "";
-
-  const normalizedPath = preferredPath.replace(/^\/+|\/+$/g, "");
-  if (!normalizedPath) return "";
-
-  if (normalizedPath.toLowerCase().endsWith(".md")) {
-    return parentDirectoryFromPath(normalizedPath);
+export function expandAncestorPaths(expandedPaths: Set<string>, path: string): Set<string> {
+  const next = new Set(expandedPaths);
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length <= 1) {
+    return next;
   }
 
-  return normalizedPath;
+  let current = "";
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    current = current ? `${current}/${segments[index]}` : segments[index];
+    next.add(current);
+  }
+  return next;
 }

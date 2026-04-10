@@ -52,7 +52,7 @@ function ensureMarkdownPath(path: string): string {
   return /\.[a-z0-9]+$/i.test(path) ? path : `${path}.md`;
 }
 
-export function resolveMarkdownLinkTarget(currentPath: string, rawUrl: string): LinkTarget | null {
+export function resolveMarkdownLinkTarget(currentPath: string, rawUrl: string, workspaceRoot?: string): LinkTarget | null {
   const url = rawUrl.trim();
   if (!url) return null;
 
@@ -68,8 +68,17 @@ export function resolveMarkdownLinkTarget(currentPath: string, rawUrl: string): 
   }
 
   const decodedPath = decodeURIComponent(rawPathPart);
+  const normalizedWorkspaceRoot = workspaceRoot
+    ? workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+    : "";
+  const normalizedDecodedPath = decodedPath.replace(/\\/g, "/");
+  const workspaceRelativePath =
+    normalizedWorkspaceRoot &&
+    (normalizedDecodedPath === normalizedWorkspaceRoot || normalizedDecodedPath.startsWith(`${normalizedWorkspaceRoot}/`))
+      ? normalizedDecodedPath.slice(normalizedWorkspaceRoot.length).replace(/^\/+/, "")
+      : null;
   const pathPart = decodedPath.startsWith("/")
-    ? decodedPath.slice(1)
+    ? (workspaceRelativePath ?? decodedPath.slice(1))
     : normalizeDocPath(`${dirname(currentPath)}/${decodedPath}`);
 
   return {
@@ -101,9 +110,9 @@ export function resolveAtReferenceTarget(currentPath: string, rawReference: stri
   };
 }
 
-export function resolveEditorReferenceTarget(currentPath: string, rawTarget: string): LinkTarget | null {
+export function resolveEditorReferenceTarget(currentPath: string, rawTarget: string, workspaceRoot?: string): LinkTarget | null {
   if (rawTarget.trim().startsWith("@")) {
     return resolveAtReferenceTarget(currentPath, rawTarget);
   }
-  return resolveMarkdownLinkTarget(currentPath, rawTarget);
+  return resolveMarkdownLinkTarget(currentPath, rawTarget, workspaceRoot);
 }

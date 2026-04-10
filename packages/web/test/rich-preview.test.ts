@@ -9,6 +9,7 @@ import {
   slugifyHeading,
 } from "../src/components/editor/codemirror/navigation.ts";
 import { parseMarkdownTable } from "../src/components/editor/codemirror/table-render.ts";
+import { collectProtectedRanges, rangesOverlap } from "../src/components/editor/codemirror/live-preview-ranges.ts";
 
 test("resolveMarkdownLinkTarget resolves external urls separately", () => {
   assert.deepEqual(
@@ -28,6 +29,17 @@ test("resolveMarkdownLinkTarget resolves in-document anchors", () => {
   assert.deepEqual(
     resolveMarkdownLinkTarget("guide/welcome.md", "#Section Two"),
     { type: "internal", path: "guide/welcome.md", anchor: "Section Two" },
+  );
+});
+
+test("resolveMarkdownLinkTarget converts absolute workspace file paths into workspace-relative markdown paths", () => {
+  assert.deepEqual(
+    resolveMarkdownLinkTarget(
+      "logs/2026-03/2026-03-09-mon.md",
+      "/Users/taco/docs-markdown/need-organizing/today/20260309%20Mon.md",
+      "/Users/taco/docs-markdown",
+    ),
+    { type: "internal", path: "need-organizing/today/20260309 Mon.md" },
   );
 });
 
@@ -85,4 +97,14 @@ test("parseMarkdownTable keeps escaped pipes inside a cell with remark-gfm parsi
     alignments: ["", ""],
     rows: [["Alpha", "a \\| b"]],
   });
+});
+
+test("live preview does not crash when a link label contains inline code", () => {
+  const text = "- 원본: [`20260309 Mon.md`](/Users/taco/docs-markdown/need-organizing/today/20260309%20Mon.md)";
+  const protectedRanges = collectProtectedRanges(text, 100);
+  const inlineCodeStart = 107;
+  const inlineCodeEnd = 123;
+
+  assert.equal(protectedRanges.length, 1);
+  assert.equal(rangesOverlap(inlineCodeStart, inlineCodeEnd, protectedRanges), true);
 });
