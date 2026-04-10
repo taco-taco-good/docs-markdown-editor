@@ -7,6 +7,11 @@ Foldmark is a self-hosted Markdown workspace for one person.
 It lets you edit plain Markdown files on the web without moving them into a closed app.
 Your notes stay in a normal folder on disk, while Foldmark adds tabs, quick open, outline navigation, and live preview editing on top.
 
+## Status
+
+Foldmark is currently in early beta.
+The recommended setup path is local username/password authentication.
+
 ## The Problem Foldmark Solves
 
 Personal notes often end up in one of these states:

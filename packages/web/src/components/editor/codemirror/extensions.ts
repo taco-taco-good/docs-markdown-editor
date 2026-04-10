@@ -9,7 +9,6 @@ import {
 } from "@codemirror/commands";
 import { keymap, drawSelection, EditorView, placeholder } from "@codemirror/view";
 import { searchKeymap } from "@codemirror/search";
-import { languages } from "@codemirror/language-data";
 import {
   insertNewlineContinueMarkup,
   markdown,
@@ -45,6 +44,7 @@ import {
   moveToNextMarkdownTableCell,
   moveToPreviousMarkdownTableCell,
 } from "./table-editing";
+import { codeLanguages } from "./code-languages";
 
 const editorHighlightStyle = HighlightStyle.define([
   { tag: t.keyword, color: "#c678dd", fontWeight: "600" },
@@ -144,7 +144,7 @@ export function createEditorExtensions(options: {
   return [
     history(),
     drawSelection(),
-    markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }),
+    markdown({ base: markdownLanguage, codeLanguages, addKeymap: false }),
     syntaxHighlighting(editorHighlightStyle),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     placeholder("마크다운 문서를 입력하세요"),

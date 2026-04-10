@@ -520,26 +520,15 @@ def case_desktop_task_toggle(session: Session, suffix: str) -> None:
     issues = collect_page_issues(page)
     focus_line_end(page, "Toggle Task")
 
-    page.wait_for_function("() => Boolean(document.querySelector('.cm-md-task-toggle'))", timeout=10000)
-    page.evaluate(
-      """() => {
-        const checkbox = document.querySelector('.cm-md-task-toggle');
-        if (!checkbox) throw new Error('checkbox widget not found');
-        checkbox.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse' }));
-      }"""
-    )
-    page.wait_for_timeout(250)
+    page.locator(".cm-md-task-toggle").first.wait_for(timeout=10000)
+    page.locator(".cm-md-task-toggle").first.click()
+    page.wait_for_timeout(500)
     checked_raw = get_document_raw(session, doc_path)
 
-    page.wait_for_function("() => Boolean(document.querySelector('.cm-md-task-toggle'))", timeout=10000)
-    page.evaluate(
-      """() => {
-        const checkbox = document.querySelector('.cm-md-task-toggle');
-        if (!checkbox) throw new Error('checkbox widget not found');
-        checkbox.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse' }));
-      }"""
-    )
-    page.wait_for_timeout(250)
+    focus_line_end(page, "Toggle Task")
+    page.locator(".cm-md-task-toggle").first.wait_for(timeout=10000)
+    page.locator(".cm-md-task-toggle").first.click()
+    page.wait_for_timeout(500)
     unchecked_raw = get_document_raw(session, doc_path)
     browser.close()
 

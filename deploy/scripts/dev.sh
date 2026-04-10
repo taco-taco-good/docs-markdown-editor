@@ -3,15 +3,22 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+HOST_OVERRIDE="${HOST-}"
+PUBLIC_HOST_OVERRIDE="${PUBLIC_HOST-}"
+PORT_OVERRIDE="${PORT-}"
+WEB_PORT_OVERRIDE="${WEB_PORT-}"
+SERVER_LOG_OVERRIDE="${SERVER_LOG-}"
+WEB_LOG_OVERRIDE="${WEB_LOG-}"
+
 # shellcheck source=./load-env.sh
 source "$ROOT_DIR/deploy/scripts/load-env.sh"
 
-HOST="${HOST:-0.0.0.0}"
-PUBLIC_HOST="${PUBLIC_HOST:-localhost}"
-PORT="${PORT:-3001}"
-WEB_PORT="${WEB_PORT:-5173}"
-SERVER_LOG="${SERVER_LOG:-$ROOT_DIR/server.log}"
-WEB_LOG="${WEB_LOG:-$ROOT_DIR/packages/web/web.log}"
+HOST="${HOST_OVERRIDE:-${HOST:-0.0.0.0}}"
+PUBLIC_HOST="${PUBLIC_HOST_OVERRIDE:-${PUBLIC_HOST:-localhost}}"
+PORT="${PORT_OVERRIDE:-${PORT:-3001}}"
+WEB_PORT="${WEB_PORT_OVERRIDE:-${WEB_PORT:-5173}}"
+SERVER_LOG="${SERVER_LOG_OVERRIDE:-${SERVER_LOG:-$ROOT_DIR/server.log}}"
+WEB_LOG="${WEB_LOG_OVERRIDE:-${WEB_LOG:-$ROOT_DIR/packages/web/web.log}}"
 
 server_pid=""
 web_pid=""
@@ -51,4 +58,3 @@ if ! kill -0 "$server_pid" 2>/dev/null; then
 fi
 
 wait "$web_pid"
-
