@@ -142,3 +142,7 @@ docker compose --env-file .env -f deploy/docker/compose.yml up -d --build
 
 The Docker path was verified against the current compose file with a separate deployment `.env` and bind-mounted workspace.
 The compose configuration was validated against the current file with a separate deployment `.env` and a bind-mounted workspace path.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

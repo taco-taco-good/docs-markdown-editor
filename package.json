@@ -1,6 +1,7 @@
 {
   "name": "docs-markdown-editor",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "bash ./deploy/scripts/dev.sh",

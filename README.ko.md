@@ -140,3 +140,7 @@ docker compose --env-file .env -f deploy/docker/compose.yml up -d --build
 ```
 
 현재 compose 파일 기준으로, 별도 배포용 `.env`와 bind-mounted workspace 경로 조합으로 설정 검증을 마쳤습니다.
+
+## 라이선스
+
+MIT. 자세한 내용은 [LICENSE](./LICENSE)를 참고하세요.
