@@ -56,7 +56,7 @@ function initTheme(): string {
 
 export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
-  sidebarWidth: 260,
+  sidebarWidth: 236,
   searchOpen: false,
   outlineOpen: initOutlineOpen(),
   settingsOpen: false,
@@ -66,7 +66,7 @@ export const useUIStore = create<UIStore>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setSidebarWidth: (sidebarWidth) =>
-    set({ sidebarWidth: Math.min(Math.max(Math.round(sidebarWidth), 220), 520) }),
+    set({ sidebarWidth: Math.min(Math.max(Math.round(sidebarWidth), 200), 520) }),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   openSearch: () => set({ searchOpen: true }),
   closeSearch: () => set({ searchOpen: false }),

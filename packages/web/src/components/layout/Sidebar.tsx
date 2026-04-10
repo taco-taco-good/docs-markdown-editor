@@ -48,7 +48,7 @@ export function Sidebar() {
         onClick={() => setSidebarOpen(false)}
       />
       <aside
-        className="relative h-full flex flex-col shrink-0 overflow-hidden animate-slide-in-left md:animate-none md:static absolute left-0 top-0 bottom-0 z-40 shadow-2xl md:shadow-none"
+        className="relative h-full flex flex-col shrink-0 overflow-hidden animate-slide-in-left md:animate-none absolute md:relative left-0 top-0 bottom-0 z-40 shadow-2xl md:shadow-none"
         style={{
           width: `min(88vw, ${width}px)`,
           background: "var(--color-surface-1)",

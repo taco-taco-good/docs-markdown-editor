@@ -74,6 +74,15 @@ export const codeLanguages = [
     },
   }),
   LanguageDescription.of({
+    name: "C",
+    alias: ["c", "h", "cpp", "c++", "cc", "cxx", "hpp"],
+    extensions: ["c", "h", "cpp", "cc", "cxx", "hpp"],
+    load: async () => {
+      const { cpp } = await import("@codemirror/lang-cpp");
+      return cpp();
+    },
+  }),
+  LanguageDescription.of({
     name: "Go",
     alias: ["go", "golang"],
     extensions: ["go"],

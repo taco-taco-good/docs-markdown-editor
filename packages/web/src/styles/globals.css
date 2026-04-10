@@ -43,8 +43,8 @@
   --font-size-3xl: 2rem;
 
   /* Spacing rhythm */
-  --spacing-page: clamp(1.5rem, 3vw, 2.75rem);
-  --spacing-gutter: 1.25rem;
+  --spacing-page: 2rem;
+  --spacing-gutter: 0.875rem;
 
   /* Sidebar */
   --sidebar-width: 260px;
@@ -428,7 +428,7 @@ body {
   min-height: 0;
   overflow: auto;
   position: relative;
-  padding-inline: clamp(0.55rem, 1.2vw, 1rem);
+  padding-inline: var(--spacing-gutter);
 }
 
 .docs-editor-codemirror__host {
@@ -525,6 +525,8 @@ body {
 .docs-editor .cm-md-line--code,
 .docs-editor .cm-md-line--code-fence {
   font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: inherit;
   background: #181b21;
 }
 
@@ -1087,8 +1089,8 @@ body {
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
-  right: -2px;
-  width: 5px;
+  right: -4px;
+  width: 9px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
@@ -1102,19 +1104,20 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 3px;
-  height: 24px;
+  width: 1px;
+  height: 100%;
   border-radius: 2px;
-  background: transparent;
-  transition: background 0.15s ease;
+  background: color-mix(in srgb, var(--color-border) 82%, transparent);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .sidebar-resize-handle:hover {
-  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .sidebar-resize-handle:hover::after {
-  background: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /* ─── Responsive: Mobile ─── */
@@ -1122,6 +1125,11 @@ body {
 @media (max-width: 767px) {
   html {
     font-size: 14px;
+  }
+
+  :root {
+    --spacing-page: 1rem;
+    --spacing-gutter: 0.625rem;
   }
 
   .docs-editor .cm-editor {
