@@ -10,6 +10,21 @@ Foldmark uses a simple branch model.
 - `develop`
   Active integration branch for ongoing work.
 
+## Release branches
+
+Foldmark uses release branches before shipping to `main`.
+
+- `release/<version>`
+  short stabilization branch created from `develop`
+
+Use release branches to:
+
+- fix regressions
+- verify deployment
+- confirm docs and release notes
+
+Do not use release branches for new feature work.
+
 ## Working branches
 
 Use short-lived branches from `develop` for normal work:
@@ -49,6 +64,8 @@ Preferred types:
 - avoid mixing unrelated refactors and feature work
 - merge into `develop` first
 - promote to `main` only when the result is deployment-ready
+
+For actual release criteria and bug gating, see [RELEASE.md](./RELEASE.md).
 
 ## Practical rule
 

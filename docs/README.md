@@ -15,6 +15,9 @@ Old planning-heavy documents were removed because they no longer matched the cur
 - [GIT-WORKFLOW.md](./GIT-WORKFLOW.md)
   Repository branch and merge conventions used for Foldmark.
 
+- [RELEASE.md](./RELEASE.md)
+  Release branch strategy, release gates, and bug handling policy.
+
 ## What is intentionally not here
 
 - long-form speculative PRDs
