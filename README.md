@@ -4,7 +4,8 @@
 
 Foldmark is a self-hosted Markdown workspace for one person.
 
-It turns an ordinary folder of `.md` files into a calm writing environment with tabs, quick open, outline navigation, and live preview editing, while keeping your notes as plain files on disk.
+It lets you edit plain Markdown files on the web without moving them into a closed app.
+Your notes stay in a normal folder on disk, while Foldmark adds tabs, quick open, outline navigation, and live preview editing on top.
 
 ## The Problem Foldmark Solves
 
